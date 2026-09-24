@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="My Test Space - A beautiful personal online examination platform. Challenge yourself, learn, and improve.">
+    <title>My Test Space ❤️</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-inner">
+            <a href="/" class="site-logo">
+                <span>❤️</span> My Test Space
+            </a>
+            <a href="/admin" class="btn btn-ghost btn-sm">🔑 Admin</a>
+        </div>
+    </header>
+
+    <!-- Hero -->
+    <section class="hero">
+        <span class="heart-icon">❤️</span>
+        <h1>My Test Space</h1>
+        <p>Challenge yourself. Learn something new. See how far you can go.</p>
+    </section>
+
+    <!-- Main Content -->
+    <main class="container">
+        <h2 class="section-title">📝 Available Tests</h2>
+        
+        <div id="loadingState" class="loading">
+            <div class="spinner"></div>
+        </div>
+
+        <div id="emptyState" class="empty-state hidden">
+            <span class="empty-icon">❤️</span>
+            <h3>No tests yet</h3>
+            <p>New tests will appear here soon.</p>
+        </div>
+
+        <div id="testGrid" class="test-grid"></div>
+    </main>
+
+    <script>
+        // ── Utility Functions ──────────────────────────────────────
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ── Load Tests ─────────────────────────────────────────────
+        async function loadTests() {
+            try {
+                const res = await fetch('/api/tests');
+                const tests = await res.json();
+                
+                document.getElementById('loadingState').classList.add('hidden');
+                
+                if (tests.length === 0) {
+                    document.getElementById('emptyState').classList.remove('hidden');
+                    return;
+                }
+                
+                const grid = document.getElementById('testGrid');
+                grid.innerHTML = tests.map(test => `
+                    <div class="card test-card" onclick="window.location.href='/test/${test.id}'">
+                        <div class="card-body">
+                            <span class="card-heart">❤️</span>
+                            <h3>${escapeHtml(test.name)}</h3>
+                            <div class="test-meta">
+                                <span>📝 ${test.question_count} Question${test.question_count !== 1 ? 's' : ''}</span>
+                                <span>⏱️ ${test.duration} Minute${test.duration !== 1 ? 's' : ''}</span>
+                                <span>📋 MCQ Test</span>
+                            </div>
+                            ${test.description ? `<p class="test-desc">${escapeHtml(test.description)}</p>` : ''}
+                            <button class="btn btn-primary" onclick="event.stopPropagation(); window.location.href='/test/${test.id}'">
+                                Start Test ❤️
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('emptyState').classList.remove('hidden');
+                document.getElementById('emptyState').querySelector('h3').textContent = 'Something went wrong';
+                document.getElementById('emptyState').querySelector('p').textContent = 'Could not load tests. Please try again later.';
+            }
+        }
+
+        loadTests();
+    </script>
+</body>
+</html>

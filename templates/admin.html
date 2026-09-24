@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - My Test Space ❤️</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+    <div id="modalContainer"></div>
+    <div id="app"><div class="loading"><div class="spinner"></div></div></div>
+
+    <script>
+        // ── State ──────────────────────────────────────────────────
+        let isAuth = false;
+        let currentView = 'dashboard'; // dashboard | tests | create | edit | preview
+        let tests = [];
+        let editTest = null;
+        let editQuestions = [];
+        let sidebarOpen = false;
+        let editingQuestion = null; // null or question data being edited
+        let showQuestionEditor = false;
+
+        // ── Utilities ──────────────────────────────────────────────
+        function esc(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+        function showToast(m, type='success') {
+            const c=document.getElementById('toastContainer');
+            const t=document.createElement('div'); t.className=`toast ${type}`; t.textContent=m;
+            c.appendChild(t); setTimeout(()=>t.remove(), 3000);
+        }
+        function showModal(icon, title, msg, actions) {
+            document.getElementById('modalContainer').innerHTML=`
+                <div class="modal-overlay" onclick="closeModal()">
+                    <div class="modal" onclick="event.stopPropagation()">
+                        <span class="modal-icon">${icon}</span><h3>${title}</h3>
+                        <p>${msg}</p><div class="modal-actions">${actions}</div>
+                    </div></div>`;
+        }
+        function closeModal() { document.getElementById('modalContainer').innerHTML=''; }
+
+        // ── Auth ───────────────────────────────────────────────────
+        async function checkAuth() {
+            const res = await fetch('/api/auth/check');
+            const data = await res.json();
+            isAuth = data.authenticated;
+            render();
+        }
+
+        async function login() {
+            const pw = document.getElementById('loginPassword').value;
+            const errEl = document.getElementById('loginError');
+            if (!pw) { errEl.textContent = 'Please enter the password'; return; }
+            const res = await fetch('/api/auth/login', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({password: pw})
+            });
+            if (res.ok) { isAuth = true; showToast('Welcome back! ❤️'); render(); }
+            else { errEl.textContent = 'Invalid password'; }
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', {method:'POST'});
+            isAuth = false; render();
+        }
+
+        function handleLoginKey(e) { if(e.key==='Enter') login(); }
+
+        // ── API ────────────────────────────────────────────────────
+        async function api(url, method='GET', body=null) {
+            const opts = {method, headers: {}};
+            if (body && !(body instanceof FormData)) {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.body = JSON.stringify(body);
+            } else if (body instanceof FormData) {
+                opts.body = body;
+            }
+            const res = await fetch(url, opts);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Request failed');
+            return data;
+        }
+
+        // ── Data Loading ───────────────────────────────────────────
+        async function loadTests() {
+            tests = await api('/api/tests');
+        }
+
+        async function loadStats() {
+            return await api('/api/stats');
+        }
+
+        async function loadTestForEdit(testId) {
+            editTest = await api(`/api/tests/${testId}`);
+            editQuestions = await api(`/api/tests/${testId}/questions`);
+            showQuestionEditor = false;
+            editingQuestion = null;
+        }
+
+        // ── Test CRUD ──────────────────────────────────────────────
+        async function createTest() {
+            const name = document.getElementById('testName').value.trim();
+            const desc = document.getElementById('testDesc').value.trim();
+            const dur = parseInt(document.getElementById('testDuration').value) || 30;
+            if (!name) { showToast('Test name is required', 'error'); return; }
+            try {
+                const t = await api('/api/tests', 'POST', {name, description: desc, duration: dur});
+                showToast('Test created successfully ❤️');
+                await loadTestForEdit(t.id);
+                currentView = 'edit';
+                render();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function updateTest() {
+            const name = document.getElementById('editTestName').value.trim();
+            const desc = document.getElementById('editTestDesc').value.trim();
+            const dur = parseInt(document.getElementById('editTestDuration').value) || 30;
+            if (!name) { showToast('Test name is required', 'error'); return; }
+            try {
+                await api(`/api/tests/${editTest.id}`, 'PUT', {name, description: desc, duration: dur});
+                editTest.name = name; editTest.description = desc; editTest.duration = dur;
+                showToast('Changes saved ❤️');
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function deleteTest(id, name) {
+            showModal('⚠️', 'Delete Test?',
+                `This will permanently remove <strong>${esc(name)}</strong> and all its questions.`,
+                `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                 <button class="btn btn-danger" onclick="closeModal(); confirmDeleteTest('${id}')">Delete</button>`);
+        }
+        async function confirmDeleteTest(id) {
+            try {
+                await api(`/api/tests/${id}`, 'DELETE');
+                showToast('Test deleted');
+                currentView = 'dashboard'; await loadTests(); render();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function togglePublish(id, currentStatus) {
+            const newStatus = currentStatus === 'published' ? 'draft' : 'published';
+            try {
+                await api(`/api/tests/${id}/publish`, 'PUT', {status: newStatus});
+                showToast(newStatus === 'published' ? 'Test published ❤️' : 'Test unpublished');
+                if (editTest && editTest.id === id) editTest.status = newStatus;
+                await loadTests(); render();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        // ── Question CRUD ──────────────────────────────────────────
+        function openQuestionEditor(question = null) {
+            editingQuestion = question;
+            showQuestionEditor = true;
+            render();
+            // Scroll to editor
+            setTimeout(() => {
+                const el = document.getElementById('questionEditorSection');
+                if (el) el.scrollIntoView({behavior: 'smooth'});
+            }, 100);
+        }
+
+        function editQuestionById(qId) {
+            const q = editQuestions.find(q => q.id === qId);
+            if (q) openQuestionEditor(q);
+        }
+
+        function closeQuestionEditor() {
+            showQuestionEditor = false;
+            editingQuestion = null;
+            render();
+        }
+
+        async function uploadImage() {
+            const input = document.getElementById('qImageInput');
+            if (!input.files || !input.files[0]) return;
+            const formData = new FormData();
+            formData.append('image', input.files[0]);
+            try {
+                const data = await api('/api/upload', 'POST', formData);
+                document.getElementById('qImageFilename').value = data.filename;
+                renderImagePreview(data.filename);
+                showToast('Image uploaded ❤️');
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        function renderImagePreview(filename) {
+            const container = document.getElementById('imagePreviewContainer');
+            if (filename) {
+                container.innerHTML = `
+                    <div class="image-preview">
+                        <img src="/uploads/${filename}" alt="Question image">
+                        <button class="remove-image" onclick="removeImage()" title="Remove image">✕</button>
+                    </div>`;
+            } else {
+                container.innerHTML = '';
+            }
+        }
+
+        function removeImage() {
+            document.getElementById('qImageFilename').value = '';
+            document.getElementById('imagePreviewContainer').innerHTML = '';
+        }
+
+        function triggerImageUpload() {
+            document.getElementById('qImageInput').click();
+        }
+
+        async function saveQuestion() {
+            const qText = document.getElementById('qText').value.trim();
+            const qImage = document.getElementById('qImageFilename').value;
+            const optA = document.getElementById('qOptA').value.trim();
+            const optB = document.getElementById('qOptB').value.trim();
+            const optC = document.getElementById('qOptC').value.trim();
+            const optD = document.getElementById('qOptD').value.trim();
+            const correct = document.querySelector('input[name="correctAnswer"]:checked');
+
+            if (!qText && !qImage) { showToast('Enter question text or upload an image', 'error'); return; }
+            if (!optA || !optB || !optC || !optD) { showToast('All four options are required', 'error'); return; }
+            if (!correct) { showToast('Select the correct answer', 'error'); return; }
+
+            const body = {
+                question_text: qText, question_image: qImage,
+                option_a: optA, option_b: optB, option_c: optC, option_d: optD,
+                correct_answer: correct.value
+            };
+
+            try {
+                if (editingQuestion) {
+                    await api(`/api/tests/${editTest.id}/questions/${editingQuestion.id}`, 'PUT', body);
+                    showToast('Question updated ❤️');
+                } else {
+                    await api(`/api/tests/${editTest.id}/questions`, 'POST', body);
+                    showToast('Question saved ❤️');
+                }
+                editQuestions = await api(`/api/tests/${editTest.id}/questions`);
+                editTest.question_count = editQuestions.length;
+                showQuestionEditor = false;
+                editingQuestion = null;
+                render();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function deleteQuestion(qId) {
+            showModal('⚠️', 'Delete Question?',
+                'This will permanently remove this question.',
+                `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                 <button class="btn btn-danger" onclick="closeModal(); confirmDeleteQuestion('${qId}')">Delete</button>`);
+        }
+        async function confirmDeleteQuestion(qId) {
+            try {
+                await api(`/api/tests/${editTest.id}/questions/${qId}`, 'DELETE');
+                editQuestions = await api(`/api/tests/${editTest.id}/questions`);
+                editTest.question_count = editQuestions.length;
+                showToast('Question deleted');
+                render();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        // ── Navigation ────────────────────────────────────────────
+        function navigate(view, testId) {
+            showQuestionEditor = false;
+            editingQuestion = null;
+            if (view === 'edit' && testId) {
+                loadTestForEdit(testId).then(() => { currentView = 'edit'; render(); });
+                return;
+            }
+            if (view === 'preview' && testId) {
+                loadTestForEdit(testId).then(() => { currentView = 'preview'; render(); });
+                return;
+            }
+            if (view === 'dashboard' || view === 'tests') {
+                loadTests().then(() => { currentView = view; render(); });
+                return;
+            }
+            currentView = view;
+            render();
+        }
+
+        function toggleSidebar() {
+            sidebarOpen = !sidebarOpen;
+            document.querySelector('.admin-sidebar')?.classList.toggle('open', sidebarOpen);
+            document.querySelector('.sidebar-overlay')?.classList.toggle('open', sidebarOpen);
+        }
+
+        // ── Main Render ────────────────────────────────────────────
+        function render() {
+            const app = document.getElementById('app');
+            if (!isAuth) { renderLogin(app); return; }
+            app.innerHTML = `
+                <div class="admin-layout">
+                    <div class="admin-mobile-header">
+                        <button class="hamburger" onclick="toggleSidebar()">☰</button>
+                        <span class="site-logo" style="font-size:1.1rem">❤️ My Test Space</span>
+                        <div></div>
+                    </div>
+                    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
+                    <aside class="admin-sidebar">
+                        <div class="sidebar-logo">❤️ My Test Space</div>
+                        <ul class="sidebar-nav">
+                            <li><a class="${currentView==='dashboard'?'active':''}" onclick="navigate('dashboard')">📊 Dashboard</a></li>
+                            <li><a class="${currentView==='tests'||currentView==='edit'?'active':''}" onclick="navigate('tests')">📝 All Tests</a></li>
+                            <li><a class="${currentView==='create'?'active':''}" onclick="navigate('create')">➕ Create Test</a></li>
+                            <li><a href="/" target="_blank">🌐 View Website</a></li>
+                            <li><a onclick="logout()">🚪 Logout</a></li>
+                        </ul>
+                    </aside>
+                    <main class="admin-main" id="adminContent"></main>
+                </div>`;
+            const content = document.getElementById('adminContent');
+            if (currentView === 'dashboard') renderDashboard(content);
+            else if (currentView === 'tests') renderTests(content);
+            else if (currentView === 'create') renderCreate(content);
+            else if (currentView === 'edit') renderEdit(content);
+            else if (currentView === 'preview') renderPreview(content);
+        }
+
+        // ── Login ──────────────────────────────────────────────────
+        function renderLogin(app) {
+            app.innerHTML = `
+                <div class="login-page">
+                    <div class="login-card">
+                        <span class="login-icon">❤️</span>
+                        <h2>Admin Login</h2>
+                        <p class="login-subtitle">Enter your admin password to manage tests.</p>
+                        <div class="form-group">
+                            <label for="loginPassword">Password</label>
+                            <input type="password" id="loginPassword" placeholder="Enter admin password" onkeyup="handleLoginKey(event)">
+                        </div>
+                        <div id="loginError" class="login-error"></div>
+                        <button class="btn btn-primary" onclick="login()">Login ❤️</button>
+                        <div class="mt-2"><a href="/" class="btn btn-ghost">← Back to Home</a></div>
+                    </div>
+                </div>`;
+            setTimeout(() => document.getElementById('loginPassword')?.focus(), 100);
+        }
+
+        // ── Dashboard ──────────────────────────────────────────────
+        async function renderDashboard(el) {
+            el.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            try {
+                const [stats] = await Promise.all([loadStats(), loadTests()]);
+                el.innerHTML = `
+                    <div class="admin-page-header">
+                        <h1>Dashboard</h1>
+                        <button class="btn btn-primary" onclick="navigate('create')">+ Create New Test</button>
+                    </div>
+                    <div class="admin-stats">
+                        <div class="admin-stat-card">
+                            <div class="stat-icon">📝</div>
+                            <div class="stat-info"><div class="stat-value">${stats.total_tests}</div><div class="stat-label">Total Tests</div></div>
+                        </div>
+                        <div class="admin-stat-card">
+                            <div class="stat-icon">✅</div>
+                            <div class="stat-info"><div class="stat-value">${stats.published}</div><div class="stat-label">Published</div></div>
+                        </div>
+                        <div class="admin-stat-card">
+                            <div class="stat-icon">📋</div>
+                            <div class="stat-info"><div class="stat-value">${stats.drafts}</div><div class="stat-label">Drafts</div></div>
+                        </div>
+                        <div class="admin-stat-card">
+                            <div class="stat-icon">❓</div>
+                            <div class="stat-info"><div class="stat-value">${stats.total_questions}</div><div class="stat-label">Total Questions</div></div>
+                        </div>
+                    </div>
+                    ${tests.length > 0 ? `
+                    <h2 style="margin-bottom:16px">Recent Tests</h2>
+                    <div class="admin-table-wrap">
+                        <table class="admin-table">
+                            <thead><tr><th>Test</th><th>Questions</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                ${tests.slice(0,5).map(t => `<tr>
+                                    <td><strong>${esc(t.name)}</strong></td>
+                                    <td>${t.question_count}</td>
+                                    <td>${t.duration} min</td>
+                                    <td><span class="status-badge ${t.status}">${t.status}</span></td>
+                                    <td><div class="table-actions">
+                                        <button class="btn btn-secondary btn-sm" onclick="navigate('edit','${t.id}')">Edit</button>
+                                        <button class="btn btn-ghost btn-sm" onclick="navigate('preview','${t.id}')">Preview</button>
+                                    </div></td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>` : `
+                    <div class="empty-state">
+                        <span class="empty-icon">📝</span>
+                        <h3>No tests yet</h3>
+                        <p>Create your first test to get started.</p>
+                        <button class="btn btn-primary mt-2" onclick="navigate('create')">Create Test ❤️</button>
+                    </div>`}`;
+            } catch (e) { el.innerHTML = `<p class="text-muted">Error loading dashboard: ${e.message}</p>`; }
+        }
+
+        // ── Tests List ─────────────────────────────────────────────
+        async function renderTests(el) {
+            el.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            await loadTests();
+            el.innerHTML = `
+                <div class="admin-page-header">
+                    <h1>All Tests</h1>
+                    <button class="btn btn-primary" onclick="navigate('create')">+ Create New Test</button>
+                </div>
+                ${tests.length > 0 ? `
+                <div class="admin-table-wrap">
+                    <table class="admin-table">
+                        <thead><tr><th>Test</th><th>Questions</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${tests.map(t => `<tr>
+                                <td><strong>${esc(t.name)}</strong>${t.description ? `<br><small class="text-muted">${esc(t.description)}</small>` : ''}</td>
+                                <td>${t.question_count}</td>
+                                <td>${t.duration} min</td>
+                                <td><span class="status-badge ${t.status}">${t.status}</span></td>
+                                <td><div class="table-actions">
+                                    <button class="btn btn-secondary btn-sm" onclick="navigate('edit','${t.id}')">Edit</button>
+                                    <button class="btn btn-ghost btn-sm" onclick="navigate('preview','${t.id}')">Preview</button>
+                                    <button class="btn btn-sm ${t.status==='published'?'btn-secondary':'btn-success'}" onclick="togglePublish('${t.id}','${t.status}')">${t.status==='published'?'Unpublish':'Publish'}</button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteTest('${t.id}','${esc(t.name)}')">Delete</button>
+                                </div></td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>` : `
+                <div class="empty-state">
+                    <span class="empty-icon">📝</span>
+                    <h3>No tests yet</h3>
+                    <p>Create your first test.</p>
+                </div>`}`;
+        }
+
+        // ── Create Test ────────────────────────────────────────────
+        function renderCreate(el) {
+            el.innerHTML = `
+                <div class="admin-page-header">
+                    <h1>Create New Test</h1>
+                </div>
+                <div class="card"><div class="card-body" style="max-width:600px">
+                    <div class="form-group">
+                        <label for="testName">Test Name *</label>
+                        <input type="text" id="testName" placeholder="e.g., DSA Mid Semester Test">
+                    </div>
+                    <div class="form-group">
+                        <label for="testDesc">Description</label>
+                        <textarea id="testDesc" placeholder="Brief description of the test (optional)"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="testDuration">Duration (minutes) *</label>
+                        <input type="number" id="testDuration" value="30" min="1" max="300">
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-primary" onclick="createTest()">Create Test ❤️</button>
+                        <button class="btn btn-secondary" onclick="navigate('dashboard')">Cancel</button>
+                    </div>
+                </div></div>`;
+        }
+
+        // ── Edit Test ──────────────────────────────────────────────
+        function renderEdit(el) {
+            if (!editTest) { el.innerHTML = '<p>Loading...</p>'; return; }
+            el.innerHTML = `
+                <div class="admin-page-header">
+                    <h1>Edit: ${esc(editTest.name)}</h1>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn btn-ghost btn-sm" onclick="navigate('preview','${editTest.id}')">👁️ Preview</button>
+                        <button class="btn btn-sm ${editTest.status==='published'?'btn-secondary':'btn-success'}" onclick="togglePublish('${editTest.id}','${editTest.status}')">
+                            ${editTest.status==='published'?'Unpublish':'Publish'}</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteTest('${editTest.id}','${esc(editTest.name)}')">Delete</button>
+                    </div>
+                </div>
+
+                <!-- Test Settings -->
+                <div class="card mb-3"><div class="card-body">
+                    <h3 style="margin-bottom:16px">Test Settings</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                        <div class="form-group" style="margin:0">
+                            <label for="editTestName">Test Name *</label>
+                            <input type="text" id="editTestName" value="${esc(editTest.name)}">
+                        </div>
+                        <div class="form-group" style="margin:0">
+                            <label for="editTestDuration">Duration (min)</label>
+                            <input type="number" id="editTestDuration" value="${editTest.duration}" min="1">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="editTestDesc">Description</label>
+                        <textarea id="editTestDesc">${esc(editTest.description||'')}</textarea>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="updateTest()">Save Changes</button>
+                    <span class="text-muted" style="margin-left:12px;font-size:0.85rem">
+                        Status: <span class="status-badge ${editTest.status}">${editTest.status}</span>
+                        &nbsp;•&nbsp; ${editQuestions.length} question${editQuestions.length!==1?'s':''}
+                    </span>
+                </div></div>
+
+                <!-- Questions -->
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2>Questions (${editQuestions.length})</h2>
+                    <button class="btn btn-primary" onclick="openQuestionEditor()">+ Add Question</button>
+                </div>
+
+                ${showQuestionEditor ? renderQuestionEditor() : ''}
+
+                <div class="question-list" id="questionList">
+                    ${editQuestions.length === 0 && !showQuestionEditor ? `
+                        <div class="empty-state" style="padding:40px">
+                            <span class="empty-icon">❓</span>
+                            <h3>No questions yet</h3>
+                            <p>Click "Add Question" to start building your test.</p>
+                        </div>` : ''}
+                    ${editQuestions.map((q, i) => `
+                        <div class="question-card">
+                            <div class="qc-header">
+                                <span class="qc-number">Question ${i + 1}</span>
+                                <div class="qc-actions">
+                                    <button class="btn btn-ghost btn-sm" onclick="editQuestionById('${q.id}')">✏️ Edit</button>
+                                    <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="deleteQuestion('${q.id}')">🗑️ Delete</button>
+                                </div>
+                            </div>
+                            <div class="qc-content">
+                                ${q.question_image ? `<img src="/uploads/${q.question_image}" alt="Q${i+1}">` : ''}
+                                ${q.question_text ? `<p>${esc(q.question_text)}</p>` : ''}
+                            </div>
+                            <div class="qc-options">
+                                <span class="${q.correct_answer==='A'?'correct':''}">A. ${esc(q.option_a)}</span>
+                                <span class="${q.correct_answer==='B'?'correct':''}">B. ${esc(q.option_b)}</span>
+                                <span class="${q.correct_answer==='C'?'correct':''}">C. ${esc(q.option_c)}</span>
+                                <span class="${q.correct_answer==='D'?'correct':''}">D. ${esc(q.option_d)}</span>
+                            </div>
+                            <div class="qc-correct">✅ Correct: ${q.correct_answer}</div>
+                        </div>`).join('')}
+                </div>
+
+                ${editQuestions.length > 0 && !showQuestionEditor ? `
+                    <div style="text-align:center;margin-top:20px">
+                        <button class="btn btn-primary" onclick="openQuestionEditor()">+ Add Another Question</button>
+                    </div>` : ''}
+            `;
+        }
+
+        // ── Question Editor ────────────────────────────────────────
+        function renderQuestionEditor() {
+            const q = editingQuestion;
+            return `
+                <div class="question-editor" id="questionEditorSection">
+                    <h3>${q ? '✏️ Edit Question' : '➕ New Question'}</h3>
+
+                    <input type="hidden" id="qImageFilename" value="${q?.question_image||''}">
+                    <input type="file" id="qImageInput" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" style="display:none" onchange="uploadImage()">
+
+                    <div class="form-group">
+                        <label>Question Image</label>
+                        <div id="imagePreviewContainer">
+                            ${q?.question_image ? `
+                                <div class="image-preview">
+                                    <img src="/uploads/${q.question_image}" alt="Question image">
+                                    <button class="remove-image" onclick="removeImage()" title="Remove">✕</button>
+                                </div>` : ''}
+                        </div>
+                        <div class="image-upload-area" onclick="triggerImageUpload()">
+                            <span class="upload-icon">📷</span>
+                            <p>${q?.question_image ? 'Replace Image' : 'Click to upload question image'}</p>
+                            <p style="font-size:0.75rem;color:var(--text-light)">PNG, JPG, WEBP (max 10MB)</p>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="qText">Question Text</label>
+                        <textarea id="qText" placeholder="Enter question text (or use an image above)">${q?.question_text||''}</textarea>
+                        <small>You can use text, image, or both.</small>
+                    </div>
+
+                    <div class="options-editor">
+                        <div class="form-group" style="margin:0">
+                            <label for="qOptA">Option A *</label>
+                            <input type="text" id="qOptA" placeholder="Option A" value="${esc(q?.option_a||'')}">
+                        </div>
+                        <div class="form-group" style="margin:0">
+                            <label for="qOptB">Option B *</label>
+                            <input type="text" id="qOptB" placeholder="Option B" value="${esc(q?.option_b||'')}">
+                        </div>
+                        <div class="form-group" style="margin:0">
+                            <label for="qOptC">Option C *</label>
+                            <input type="text" id="qOptC" placeholder="Option C" value="${esc(q?.option_c||'')}">
+                        </div>
+                        <div class="form-group" style="margin:0">
+                            <label for="qOptD">Option D *</label>
+                            <input type="text" id="qOptD" placeholder="Option D" value="${esc(q?.option_d||'')}">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Correct Answer *</label>
+                        <div class="correct-answer-selector">
+                            <label><input type="radio" name="correctAnswer" value="A" ${q?.correct_answer==='A'?'checked':''}> Option A</label>
+                            <label><input type="radio" name="correctAnswer" value="B" ${q?.correct_answer==='B'?'checked':''}> Option B</label>
+                            <label><input type="radio" name="correctAnswer" value="C" ${q?.correct_answer==='C'?'checked':''}> Option C</label>
+                            <label><input type="radio" name="correctAnswer" value="D" ${q?.correct_answer==='D'?'checked':''}> Option D</label>
+                        </div>
+                    </div>
+
+                    <div class="question-editor-actions">
+                        <button class="btn btn-primary" onclick="saveQuestion()">${q ? 'Update Question' : 'Save Question'} ❤️</button>
+                        <button class="btn btn-secondary" onclick="closeQuestionEditor()">Cancel</button>
+                    </div>
+                </div>`;
+        }
+
+        // ── Preview ────────────────────────────────────────────────
+        function renderPreview(el) {
+            if (!editTest || editQuestions.length === 0) {
+                el.innerHTML = `
+                    <div class="admin-page-header"><h1>Preview</h1></div>
+                    <div class="empty-state">
+                        <span class="empty-icon">👁️</span>
+                        <h3>Nothing to preview</h3>
+                        <p>Add questions to your test first.</p>
+                        <button class="btn btn-primary mt-2" onclick="navigate('edit','${editTest?.id||''}')">Go to Editor</button>
+                    </div>`;
+                return;
+            }
+
+            let previewQ = 0;
+
+            el.innerHTML = `
+                <div class="admin-page-header">
+                    <h1>Preview: ${esc(editTest.name)}</h1>
+                    <button class="btn btn-secondary" onclick="navigate('edit','${editTest.id}')">← Back to Editor</button>
+                </div>
+                <p class="text-muted mb-3">This is how students will see your test. Answers are hidden.</p>
+                <div class="card" style="max-width:800px">
+                    <div class="card-body" id="previewArea"></div>
+                </div>`;
+
+            function renderPreviewQ() {
+                const q = editQuestions[previewQ];
+                document.getElementById('previewArea').innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px">
+                        <span style="font-weight:700;color:var(--primary)">Question ${previewQ+1} of ${editQuestions.length}</span>
+                        <span style="color:var(--text-muted);font-size:0.9rem">⏱️ ${editTest.duration}:00 (preview)</span>
+                    </div>
+                    <div class="question-content">
+                        ${q.question_image ? `<img src="/uploads/${q.question_image}" alt="Q${previewQ+1}" style="max-width:100%">` : ''}
+                        ${q.question_text ? `<p>${esc(q.question_text)}</p>` : ''}
+                    </div>
+                    <div class="options-list">
+                        ${[{k:'A',v:q.option_a},{k:'B',v:q.option_b},{k:'C',v:q.option_c},{k:'D',v:q.option_d}].map(o => `
+                            <div class="option-item" style="cursor:default">
+                                <div class="option-radio"></div>
+                                <span class="option-label">${o.k}.</span>
+                                <span class="option-text">${esc(o.v)}</span>
+                            </div>`).join('')}
+                    </div>
+                    <div class="q-actions">
+                        <button class="btn btn-secondary" onclick="prevPreview()" ${previewQ===0?'disabled':''}>← Previous</button>
+                        <span class="text-muted">${previewQ+1} / ${editQuestions.length}</span>
+                        <button class="btn btn-primary" onclick="nextPreview()" ${previewQ===editQuestions.length-1?'disabled':''}>Next →</button>
+                    </div>`;
+            }
+
+            window.nextPreview = () => { if(previewQ<editQuestions.length-1){previewQ++;renderPreviewQ();} };
+            window.prevPreview = () => { if(previewQ>0){previewQ--;renderPreviewQ();} };
+
+            renderPreviewQ();
+        }
+
+        // ── Init ───────────────────────────────────────────────────
+        checkAuth();
+    </script>
+</body>
+</html>

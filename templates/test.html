@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Take a test on My Test Space">
+    <title>Test - My Test Space ❤️</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Modal Container -->
+    <div id="modalContainer"></div>
+
+    <!-- App Root -->
+    <div id="app">
+        <div class="loading"><div class="spinner"></div></div>
+    </div>
+
+    <script>
+        // ── State ──────────────────────────────────────────────────
+        const testId = window.location.pathname.split('/')[2];
+        let testData = null;
+        let questions = [];
+        let answers = {};    // {questionId: 'A'|'B'|'C'|'D'}
+        let currentQ = 0;
+        let timerInterval = null;
+        let remainingSeconds = 0;
+        let startTime = null;
+        let appState = 'loading'; // loading | info | taking | result
+        let resultData = null;
+
+        // ── Utilities ──────────────────────────────────────────────
+        function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+        function showToast(msg, type='success') {
+            const c = document.getElementById('toastContainer');
+            const t = document.createElement('div'); t.className = `toast ${type}`; t.textContent = msg;
+            c.appendChild(t); setTimeout(() => t.remove(), 3000);
+        }
+        function formatTime(s) {
+            const m = Math.floor(s / 60); const sec = s % 60;
+            return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+        }
+        function formatDateTime(iso) {
+            try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+        }
+        function getTimeDiff(start, end) {
+            const diff = Math.floor((new Date(end) - new Date(start)) / 1000);
+            const m = Math.floor(diff / 60); const s = diff % 60;
+            return `${m} min ${s} sec`;
+        }
+
+        // ── Modal ──────────────────────────────────────────────────
+        function showModal(icon, title, message, actions) {
+            document.getElementById('modalContainer').innerHTML = `
+                <div class="modal-overlay" onclick="closeModal()">
+                    <div class="modal" onclick="event.stopPropagation()">
+                        <span class="modal-icon">${icon}</span>
+                        <h3>${title}</h3>
+                        <p>${message}</p>
+                        <div class="modal-actions">${actions}</div>
+                    </div>
+                </div>`;
+        }
+        function closeModal() { document.getElementById('modalContainer').innerHTML = ''; }
+
+        // ── Load Test Data ─────────────────────────────────────────
+        async function loadTest() {
+            try {
+                const res = await fetch(`/api/tests/${testId}`);
+                if (!res.ok) throw new Error('Test not found');
+                testData = await res.json();
+                document.title = `${testData.name} - My Test Space ❤️`;
+                appState = 'info';
+                render();
+            } catch (err) {
+                document.getElementById('app').innerHTML = `
+                    <div class="test-start"><div class="card" style="padding:48px">
+                        <span style="font-size:3rem;display:block;margin-bottom:16px">😢</span>
+                        <h2>Test Not Found</h2>
+                        <p class="text-muted mt-1">This test doesn't exist or has been removed.</p>
+                        <a href="/" class="btn btn-primary mt-3">Back to Home</a>
+                    </div></div>`;
+            }
+        }
+
+        // ── Start Test ─────────────────────────────────────────────
+        async function startTest() {
+            try {
+                const res = await fetch(`/api/tests/${testId}/questions`);
+                questions = await res.json();
+                if (questions.length === 0) {
+                    showToast('This test has no questions', 'error');
+                    return;
+                }
+                answers = {};
+                currentQ = 0;
+                remainingSeconds = testData.duration * 60;
+                startTime = new Date().toISOString();
+                appState = 'taking';
+                render();
+                startTimer();
+            } catch (err) {
+                showToast('Failed to load questions', 'error');
+            }
+        }
+
+        // ── Timer ──────────────────────────────────────────────────
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                remainingSeconds--;
+                updateTimerDisplay();
+                if (remainingSeconds <= 0) {
+                    clearInterval(timerInterval);
+                    showToast("⏰ Time's up! Your test has been submitted automatically.", 'error');
+                    submitTest(true);
+                }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const el = document.getElementById('timerDisplay');
+            if (!el) return;
+            el.textContent = `⏱️ ${formatTime(remainingSeconds)}`;
+            el.className = 'timer';
+            if (remainingSeconds <= 60) el.classList.add('danger');
+            else if (remainingSeconds <= 300) el.classList.add('warning');
+        }
+
+        // ── Submit ─────────────────────────────────────────────────
+        function confirmSubmit() {
+            const attempted = Object.keys(answers).length;
+            const unattempted = questions.length - attempted;
+            showModal('📝', 'Submit Test?',
+                `<strong>Attempted:</strong> ${attempted} / ${questions.length}<br>
+                 <strong>Unattempted:</strong> ${unattempted} / ${questions.length}`,
+                `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                 <button class="btn btn-primary" onclick="closeModal(); submitTest(false)">Submit Test</button>`
+            );
+        }
+
+        async function submitTest(autoSubmit) {
+            if (timerInterval) clearInterval(timerInterval);
+            const endTime = new Date().toISOString();
+            try {
+                const res = await fetch(`/api/tests/${testId}/submit`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ answers, start_time: startTime, end_time: endTime })
+                });
+                resultData = await res.json();
+                resultData.start_time = startTime;
+                resultData.end_time = endTime;
+                appState = 'result';
+                render();
+                window.scrollTo(0, 0);
+            } catch (err) {
+                showToast('Failed to submit test', 'error');
+            }
+        }
+
+        // ── Select Answer ──────────────────────────────────────────
+        function selectAnswer(qId, answer) {
+            answers[qId] = answer;
+            renderQuestion();
+            renderQNav();
+        }
+
+        // ── Navigation ────────────────────────────────────────────
+        function goToQuestion(idx) {
+            if (idx >= 0 && idx < questions.length) {
+                currentQ = idx;
+                renderQuestion();
+                renderQNav();
+            }
+        }
+
+        // ── Reattempt ──────────────────────────────────────────────
+        function reattempt() {
+            answers = {};
+            currentQ = 0;
+            remainingSeconds = testData.duration * 60;
+            startTime = new Date().toISOString();
+            resultData = null;
+            appState = 'taking';
+            render();
+            startTimer();
+            window.scrollTo(0, 0);
+        }
+
+        // ── Render Functions ───────────────────────────────────────
+        function render() {
+            const app = document.getElementById('app');
+            if (appState === 'info') renderInfo(app);
+            else if (appState === 'taking') renderTaking(app);
+            else if (appState === 'result') renderResult(app);
+        }
+
+        function renderInfo(app) {
+            app.innerHTML = `
+                <header class="site-header">
+                    <div class="header-inner">
+                        <a href="/" class="site-logo"><span>❤️</span> My Test Space</a>
+                    </div>
+                </header>
+                <div class="test-start">
+                    <div class="card">
+                        <span class="test-heart">❤️</span>
+                        <h1>${escapeHtml(testData.name)}</h1>
+                        ${testData.description ? `<p class="text-muted mt-1">${escapeHtml(testData.description)}</p>` : ''}
+                        <div class="test-meta-lg">
+                            <span><strong>${testData.question_count}</strong> Questions</span>
+                            <span><strong>${testData.duration}</strong> Minutes</span>
+                        </div>
+                        <div class="instructions">
+                            <h3>📋 Instructions</h3>
+                            <ul>
+                                <li>Each question has four options (A, B, C, D).</li>
+                                <li>Select one answer for each question.</li>
+                                <li>You can move between questions using Previous/Next.</li>
+                                <li>Your score will be shown after submission.</li>
+                                <li>The timer starts when you click Start Test.</li>
+                                <li>The test auto-submits when time runs out.</li>
+                            </ul>
+                        </div>
+                        ${testData.question_count > 0 
+                            ? `<button class="btn btn-primary btn-lg" onclick="startTest()">START TEST ❤️</button>`
+                            : `<p class="text-muted mt-2">This test has no questions yet.</p>`
+                        }
+                        <div class="mt-2"><a href="/" class="btn btn-ghost">← Back to All Tests</a></div>
+                    </div>
+                </div>`;
+        }
+
+        function renderTaking(app) {
+            app.innerHTML = `
+                <div class="test-interface">
+                    <div class="test-topbar">
+                        <span class="test-name">❤️ ${escapeHtml(testData.name)}</span>
+                        <span class="q-indicator">Q ${currentQ + 1} / ${questions.length}</span>
+                        <span id="timerDisplay" class="timer">⏱️ ${formatTime(remainingSeconds)}</span>
+                        <button class="btn btn-primary btn-sm" onclick="confirmSubmit()">Submit Test</button>
+                    </div>
+                    <div class="q-nav-bar" id="qNavBar"></div>
+                    <div class="question-area" id="questionArea"></div>
+                </div>`;
+            renderQNav();
+            renderQuestion();
+            updateTimerDisplay();
+        }
+
+        function renderQNav() {
+            const nav = document.getElementById('qNavBar');
+            if (!nav) return;
+            nav.innerHTML = questions.map((q, i) => {
+                let cls = 'q-nav-btn';
+                if (i === currentQ) cls += ' current';
+                else if (answers[q.id]) cls += ' attempted';
+                return `<button class="${cls}" onclick="goToQuestion(${i})">${i + 1}</button>`;
+            }).join('');
+        }
+
+        function renderQuestion() {
+            const area = document.getElementById('questionArea');
+            if (!area) return;
+            const q = questions[currentQ];
+            const selected = answers[q.id] || '';
+            const opts = [
+                {key: 'A', text: q.option_a},
+                {key: 'B', text: q.option_b},
+                {key: 'C', text: q.option_c},
+                {key: 'D', text: q.option_d}
+            ];
+
+            area.innerHTML = `
+                <div class="question-number">Question ${currentQ + 1} of ${questions.length}</div>
+                <div class="question-content">
+                    ${q.question_image ? `<img src="/uploads/${q.question_image}" alt="Question ${currentQ + 1}" loading="lazy">` : ''}
+                    ${q.question_text ? `<p>${escapeHtml(q.question_text)}</p>` : ''}
+                </div>
+                <div class="options-list">
+                    ${opts.map(o => `
+                        <div class="option-item ${selected === o.key ? 'selected' : ''}"
+                             onclick="selectAnswer('${q.id}', '${o.key}')">
+                            <div class="option-radio"></div>
+                            <span class="option-label">${o.key}.</span>
+                            <span class="option-text">${escapeHtml(o.text)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="q-actions">
+                    <button class="btn btn-secondary" onclick="goToQuestion(${currentQ - 1})" ${currentQ === 0 ? 'disabled' : ''}>
+                        ← Previous
+                    </button>
+                    ${currentQ === questions.length - 1
+                        ? `<button class="btn btn-primary" onclick="confirmSubmit()">Submit Test</button>`
+                        : `<button class="btn btn-primary" onclick="goToQuestion(${currentQ + 1})">Next →</button>`
+                    }
+                </div>`;
+        }
+
+        function renderResult(app) {
+            const r = resultData;
+            const pct = r.percentage;
+            let msg = '❤️ Great effort!';
+            if (pct >= 90) msg = '🌟 Outstanding! You\'re amazing!';
+            else if (pct >= 75) msg = '❤️ Great work! Well done!';
+            else if (pct >= 50) msg = '💪 Good job! Keep improving!';
+            else if (pct >= 25) msg = '📚 Keep studying, you\'ll get there!';
+            else msg = '💪 Don\'t give up! Try again!';
+
+            const timeTaken = r.start_time && r.end_time ? getTimeDiff(r.start_time, r.end_time) : '—';
+
+            app.innerHTML = `
+                <header class="site-header">
+                    <div class="header-inner">
+                        <a href="/" class="site-logo"><span>❤️</span> My Test Space</a>
+                    </div>
+                </header>
+                <div class="result-page">
+                    <div class="result-header">
+                        <span class="result-icon">🎉</span>
+                        <h1>Test Completed!</h1>
+                        <p class="test-name-sub">${escapeHtml(r.test_name)}</p>
+                    </div>
+
+                    <div class="score-card">
+                        <div class="score-big">${r.score} / ${r.max_score}</div>
+                        <div class="score-pct">${r.percentage}%</div>
+                        <div class="score-msg">${msg}</div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card correct">
+                            <div class="stat-value">${r.correct}</div>
+                            <div class="stat-label">Correct</div>
+                        </div>
+                        <div class="stat-card wrong">
+                            <div class="stat-value">${r.wrong}</div>
+                            <div class="stat-label">Wrong</div>
+                        </div>
+                        <div class="stat-card unattempted">
+                            <div class="stat-value">${r.unattempted}</div>
+                            <div class="stat-label">Unattempted</div>
+                        </div>
+                        <div class="stat-card time">
+                            <div class="stat-value">${timeTaken}</div>
+                            <div class="stat-label">Time Taken</div>
+                        </div>
+                    </div>
+
+                    <h2 class="result-detail-header">📋 Detailed Analysis</h2>
+
+                    ${r.details.map((d, i) => {
+                        const optMap = {A: d.option_a, B: d.option_b, C: d.option_c, D: d.option_d};
+                        const userText = d.user_answer ? `${d.user_answer}. ${optMap[d.user_answer]}` : 'Not Attempted';
+                        const correctText = `${d.correct_answer}. ${optMap[d.correct_answer]}`;
+                        const badge = d.status === 'correct' ? '<span class="rq-badge correct">🟢 Correct</span>'
+                                    : d.status === 'wrong' ? '<span class="rq-badge wrong">🔴 Incorrect</span>'
+                                    : '<span class="rq-badge unattempted">🟠 Not Attempted</span>';
+                        return `
+                        <div class="result-question">
+                            <div class="rq-header">
+                                <span class="rq-number">Question ${i + 1}</span>
+                                ${badge}
+                            </div>
+                            <div class="rq-content">
+                                ${d.question_image ? `<img src="/uploads/${d.question_image}" alt="Q${i+1}" loading="lazy">` : ''}
+                                ${d.question_text ? `<p>${escapeHtml(d.question_text)}</p>` : ''}
+                            </div>
+                            <div class="rq-answers">
+                                <div class="rq-answer-block user-answer">
+                                    <div class="rq-answer-label">Your Answer</div>
+                                    <div class="rq-answer-value">${escapeHtml(userText)}</div>
+                                </div>
+                                <div class="rq-answer-block correct-answer">
+                                    <div class="rq-answer-label">Correct Answer</div>
+                                    <div class="rq-answer-value">${escapeHtml(correctText)}</div>
+                                </div>
+                            </div>
+                        </div>`;
+                    }).join('')}
+
+                    <div class="result-actions">
+                        <button class="btn btn-primary btn-lg" onclick="reattempt()">Reattempt Test ❤️</button>
+                        <a href="/" class="btn btn-secondary btn-lg">Back to All Tests</a>
+                    </div>
+                </div>`;
+        }
+
+        // ── Initialize ─────────────────────────────────────────────
+        loadTest();
+    </script>
+</body>
+</html>
