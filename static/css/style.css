@@ -253,7 +253,7 @@ textarea { resize: vertical; min-height: 80px; }
     background: #fff; border-radius: var(--radius-md);
     border: 1px solid var(--border);
 }
-.question-content p { font-size: 1.05rem; line-height: 1.7; }
+.question-content p { font-size: 1.05rem; line-height: 1.7; white-space: pre-line; }
 .question-content img {
     max-width: 100%; height: auto; border-radius: var(--radius-sm);
     display: block; margin: 8px 0;
@@ -279,7 +279,7 @@ textarea { resize: vertical; min-height: 80px; }
 .option-label {
     font-weight: 500; color: var(--primary); margin-right: 4px; min-width: 20px;
 }
-.option-text { font-size: 0.95rem; line-height: 1.5; flex: 1; }
+.option-text { font-size: 0.95rem; line-height: 1.5; flex: 1; white-space: pre-line; }
 
 /* ── Question Nav Buttons ─────────────────────────────────── */
 .q-actions {
@@ -342,7 +342,7 @@ textarea { resize: vertical; min-height: 80px; }
 .rq-badge.unattempted { background: var(--warning-bg); color: var(--warning); }
 
 .result-question .rq-content { margin-bottom: 16px; }
-.result-question .rq-content p { font-size: 0.95rem; line-height: 1.6; }
+.result-question .rq-content p { font-size: 0.95rem; line-height: 1.6; white-space: pre-line; }
 .result-question .rq-content img { max-width: 100%; height: auto; border-radius: var(--radius-sm); margin: 8px 0; }
 
 .rq-answers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -469,7 +469,7 @@ textarea { resize: vertical; min-height: 80px; }
 .question-card .qc-actions { display: flex; gap: 6px; }
 .question-card .qc-content { margin-bottom: 12px; }
 .question-card .qc-content img { max-width: 200px; height: auto; border-radius: var(--radius-sm); }
-.question-card .qc-content p { color: var(--text-dark); font-size: 0.95rem; }
+.question-card .qc-content p { color: var(--text-dark); font-size: 0.95rem; white-space: pre-line; }
 .question-card .qc-options {
     display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
     font-size: 0.85rem; color: var(--text-muted);
