@@ -492,12 +492,11 @@ def submit_test(test_id):
     
     total = len(questions)
     # Marking scheme: +1 for correct, -1/3 for wrong, 0 for unattempted
-    score = round(correct * 1 - wrong * (1/3), 2)
-    max_score = total
-    percentage = round((score / max_score * 100), 2) if max_score > 0 else 0
-    # Clamp percentage to 0 minimum for display
-    if percentage < 0:
-        percentage = 0.0
+    raw_score = correct * 1 - wrong * (1/3)
+    # Scale to 100
+    score = round((raw_score / total) * 100, 2) if total > 0 else 0
+    max_score = 100
+    percentage = round(score, 2) if score > 0 else 0.0
     
     return jsonify({
         'test_name': test['name'],
