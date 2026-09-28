@@ -135,7 +135,8 @@
             const unattempted = questions.length - attempted;
             showModal('📝', 'Submit Test?',
                 `<strong>Attempted:</strong> ${attempted} / ${questions.length}<br>
-                 <strong>Unattempted:</strong> ${unattempted} / ${questions.length}`,
+                 <strong>Unattempted:</strong> ${unattempted} / ${questions.length}<br>
+                 <small style="color:var(--text-muted, #999);">⚠️ Wrong answers carry −1/3 negative marking. Unattempted = 0 marks.</small>`,
                 `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                  <button class="btn btn-primary" onclick="closeModal(); submitTest(false)">Submit Test</button>`
             );
@@ -219,6 +220,7 @@
                             <ul>
                                 <li>Each question has four options (A, B, C, D).</li>
                                 <li>Select one answer for each question.</li>
+                                <li><strong>Marking Scheme:</strong> +1 for each correct answer, <strong>−1/3 (negative marking)</strong> for each wrong answer, 0 for unattempted.</li>
                                 <li>You can move between questions using Previous/Next.</li>
                                 <li>Your score will be shown after submission.</li>
                                 <li>The timer starts when you click Start Test.</li>
@@ -330,16 +332,19 @@
                         <div class="score-big">${r.score} / ${r.max_score}</div>
                         <div class="score-pct">${r.percentage}%</div>
                         <div class="score-msg">${msg}</div>
+                        <div class="marking-scheme-info" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted, #999);">
+                            Marking: +1 correct, −⅓ wrong, 0 unattempted
+                        </div>
                     </div>
 
                     <div class="stats-grid">
                         <div class="stat-card correct">
                             <div class="stat-value">${r.correct}</div>
-                            <div class="stat-label">Correct</div>
+                            <div class="stat-label">Correct (+${r.correct})</div>
                         </div>
                         <div class="stat-card wrong">
                             <div class="stat-value">${r.wrong}</div>
-                            <div class="stat-label">Wrong</div>
+                            <div class="stat-label">Wrong (−${(r.wrong / 3).toFixed(2)})</div>
                         </div>
                         <div class="stat-card unattempted">
                             <div class="stat-value">${r.unattempted}</div>
