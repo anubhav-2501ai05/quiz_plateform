@@ -48,7 +48,7 @@ os.makedirs('uploads', exist_ok=True)
 table_images = {}
 rects = {
     2: (0, fitz.Rect(25, 445, 560, 508)),
-    17: (3, fitz.Rect(25, 615, 450, 675))
+    17: (3, fitz.Rect(25, 615, 450, 682))
 }
 mat = fitz.Matrix(4, 4)
 for q_num, (p_idx, rect) in rects.items():
