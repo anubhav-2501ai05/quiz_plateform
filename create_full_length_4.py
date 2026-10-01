@@ -50,11 +50,12 @@ rects = {
     2: (0, fitz.Rect(58.4, 497.1, 555.5, 575.3)),
     17: (3, fitz.Rect(78.9, 638.1, 149.3, 706.8))
 }
+mat = fitz.Matrix(4, 4)
 for q_num, (p_idx, rect) in rects.items():
     try:
         page = doc[p_idx]
         padded_rect = rect + (-2, -2, 2, 2)
-        pix = page.get_pixmap(clip=padded_rect)
+        pix = page.get_pixmap(matrix=mat, clip=padded_rect)
         if pix.n >= 5:
             pix = fitz.Pixmap(fitz.csRGB, pix)
         fn = f"q_{q_num}_{uuid.uuid4().hex[:6]}.png"
