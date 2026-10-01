@@ -44,6 +44,27 @@ print("1. Parsing questions from PDF...")
 doc = fitz.open(PDF_PATH)
 os.makedirs('uploads', exist_ok=True)
 
+# Extract images for Q.2 (page 1) and Q.17 (page 4) using hardcoded rects
+table_images = {}
+rects = {
+    2: (0, fitz.Rect(58.4, 497.1, 555.5, 575.3)),
+    17: (3, fitz.Rect(78.9, 638.1, 149.3, 706.8))
+}
+for q_num, (p_idx, rect) in rects.items():
+    try:
+        page = doc[p_idx]
+        padded_rect = rect + (-2, -2, 2, 2)
+        pix = page.get_pixmap(clip=padded_rect)
+        if pix.n >= 5:
+            pix = fitz.Pixmap(fitz.csRGB, pix)
+        fn = f"q_{q_num}_{uuid.uuid4().hex[:6]}.png"
+        fp = os.path.join('uploads', fn)
+        pix.save(fp)
+        table_images[q_num] = (fn, fp)
+        print(f"   Extracted image for Q.{q_num}: {fn}")
+    except Exception as e:
+        print(f"   Failed to extract image for Q.{q_num}: {e}")
+
 questions_data = []
 
 # Special manual overrides for math formula images and subscripts
@@ -66,9 +87,6 @@ special_questions = {
     },
     14: {
         'text': "Which of the following was the venue of the 46th session of the UNESCO World Heritage Committee?"
-    },
-    17: {
-        'text': "If 3x / (1 + 1 / (1 + x / (1 - x))) = 12, then find the value of 'x'."
     },
     45: {
         'text': "Which of the following statements is INCORRECT?",
@@ -219,7 +237,7 @@ for p_idx, page in enumerate(doc):
             'option_c': opt_c,
             'option_d': opt_d,
             'correct_answer': correct_letter,
-            'image': None
+            'image': table_images.get(q_num)
         })
 
 print(f"Parsed {len(questions_data)} questions.")
@@ -242,7 +260,7 @@ conn.execute("INSERT INTO tests (id, name, description, duration, status) VALUES
 
 for i, q in enumerate(questions_data):
     q_id = str(uuid.uuid4())[:8]
-    local_img = ''
+    local_img = q['image'][0] if q['image'] else ''
     conn.execute(
         "INSERT INTO questions (id, test_id, question_text, question_image, option_a, option_b, option_c, option_d, correct_answer, order_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (q_id, test_id, q['question_text'], local_img, q['option_a'], q['option_b'], q['option_c'], q['option_d'], q['correct_answer'], i)
@@ -262,6 +280,35 @@ login_req = urllib.request.Request(f"{RENDER_URL}/api/auth/login", data=login_da
 with opener.open(login_req) as resp:
     print("   Login status:", resp.read().decode())
 
+def upload_img(local_fp, fn):
+    boundary = '----FormBoundary' + uuid.uuid4().hex
+    with open(local_fp, 'rb') as f:
+        file_bytes = f.read()
+    header = (
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"image\"; filename=\"{fn}\"\r\n"
+        f"Content-Type: image/png\r\n\r\n"
+    ).encode('utf-8')
+    footer = f"\r\n--{boundary}--\r\n".encode('utf-8')
+    payload = header + file_bytes + footer
+    req = urllib.request.Request(
+        f"{RENDER_URL}/api/upload",
+        data=payload,
+        headers={'Content-Type': f"multipart/form-data; boundary={boundary}"}
+    )
+    with opener.open(req) as r:
+        res = json.loads(r.read().decode())
+        return res.get('filename')
+
+remote_images = {}
+for q_num, (fn, fp) in table_images.items():
+    try:
+        rem_fn = upload_img(fp, fn)
+        remote_images[q_num] = rem_fn
+        print(f"   Uploaded image for Q.{q_num} -> {rem_fn}")
+    except Exception as e:
+        print(f"   Error uploading image for Q.{q_num}: {e}")
+
 print(f"\n4. Creating Test '{TEST_NAME}' on Render...")
 create_data = json.dumps({
     'name': TEST_NAME,
@@ -277,9 +324,10 @@ with opener.open(create_req) as resp:
 
 print(f"\n5. Uploading all 100 questions to Render...")
 for q in questions_data:
+    q_img = remote_images.get(q['num'], '')
     payload = {
         'question_text': q['question_text'],
-        'question_image': '',
+        'question_image': q_img,
         'option_a': q['option_a'],
         'option_b': q['option_b'],
         'option_c': q['option_c'],
