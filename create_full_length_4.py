@@ -46,8 +46,11 @@ os.makedirs('uploads', exist_ok=True)
 
 questions_data = []
 
-# Special manual overrides for math formula images
+# Special manual overrides for math formula images and subscripts
 special_questions = {
+    6: {
+        'text': "A number when increased by 50%, gives 2760. The number is:"
+    },
     7: {
         'text': "Write the expanded form of (5a + 6b + 8c)².",
         'A': "25a² + 36b² + 64c² + 64ab + 96bc + 80ac",
@@ -55,11 +58,24 @@ special_questions = {
         'C': "25a² + 36b² + 64c² + 60ab + 96bc + 80ac",
         'D': "25a² + 36b² + 64c² + 60ab + 96bc + 90ac"
     },
+    11: {
+        'text': "20 ml of NaOH is neutralised by 10 ml of HNO₃. How much NaOH will be required to neutralise 15 ml of HNO₃?"
+    },
     13: {
         'text': "The volume (in cm³) of a wire of diameter 56 cm and length 3 m is: (take π = 22/7)"
     },
+    14: {
+        'text': "Which of the following was the venue of the 46th session of the UNESCO World Heritage Committee?"
+    },
     17: {
         'text': "If 3x / (1 + 1 / (1 + x / (1 - x))) = 12, then find the value of 'x'."
+    },
+    45: {
+        'text': "Which of the following statements is INCORRECT?",
+        'A': "Sonia Gandhi became the Leader of Opposition in the 18th Lok Sabha.",
+        'B': "Narendra Modi took oath as the Prime Minister of India in June 2024.",
+        'C': "Om Birla is elected as the Speaker of the 18th Lok Sabha.",
+        'D': "Amit Shah assumed charge as Union Home Minister and Minister of Cooperation in June 2024."
     },
     47: {
         'text': "Write the expanded form of (6a + 8b + 3c)².",
@@ -68,12 +84,31 @@ special_questions = {
         'C': "36a² + 64b² + 9c² + 96ab + 48bc + 46ac",
         'D': "36a² + 64b² + 9c² + 96ab + 48bc + 36ac"
     },
+    50: {
+        'text': "The balanced equation which shows the decomposition of hydrogen peroxide is:",
+        'A': "2HO₂ → 2HO + O₂",
+        'B': "H₂O₂ → 2H₂O + O₂",
+        'C': "H₂O₂ → H₂O + O₂",
+        'D': "2H₂O₂ → 2H₂O + O₂"
+    },
     54: {
         'text': "Write the expanded form of (7a + 9b + 4c)².",
         'A': "49a² + 81b² + 16c² + 126ab + 72bc + 56ac",
         'B': "49a² + 81b² + 16c² + 126ab + 72bc + 66ac",
         'C': "49a² + 81b² + 16c² + 130ab + 72bc + 56ac",
         'D': "49a² + 81b² + 16c² + 126ab + 67bc + 56ac"
+    },
+    72: {
+        'text': "If the area of a trapezium is 80 cm² and the parallel sides are 13.5 and 6.5 cm, then the distance between them (in cm) is ______."
+    },
+    75: {
+        'text': "In a row of 38 students facing north, Sunil is 20th from the left end. If Harsh is 10th to the right of Sunil, what is Harsh's position from the right end of the row?"
+    },
+    83: {
+        'text': "Which of the following received the top honour in the Best Urban Local Body category at the 5th National Water Awards for its innovative water conservation initiatives?"
+    },
+    86: {
+        'text': "In the reaction: Zn + CuSO₄ → ZnSO₄ + Cu, what happens to zinc?"
     },
     99: {
         'text': "The diameters of two concentric circles are 34 cm and 50 cm. A straight line, CAPF, intersects the larger circle at points C and F and intersects the smaller circle at points A and P. If AP = 16 cm, find the length of CF."
