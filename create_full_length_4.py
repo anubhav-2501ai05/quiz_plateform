@@ -47,8 +47,8 @@ os.makedirs('uploads', exist_ok=True)
 # Extract images for Q.2 (page 1) and Q.17 (page 4) using hardcoded rects
 table_images = {}
 rects = {
-    2: (0, fitz.Rect(58.4, 497.1, 555.5, 575.3)),
-    17: (3, fitz.Rect(78.9, 638.1, 149.3, 706.8))
+    2: (0, fitz.Rect(25, 445, 560, 508)),
+    17: (3, fitz.Rect(25, 615, 450, 675))
 }
 mat = fitz.Matrix(4, 4)
 for q_num, (p_idx, rect) in rects.items():
