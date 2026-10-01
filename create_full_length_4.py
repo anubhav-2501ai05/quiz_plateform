@@ -35,9 +35,11 @@ def group_spans_into_lines(spans, y_tolerance=4):
             lines.append({'y': s['bbox'][1], 'spans': [s]})
     lines.sort(key=lambda l: l['y'])
     ordered_spans = []
-    for line in lines:
+    for line_id, line in enumerate(lines):
         line['spans'].sort(key=lambda s: s['bbox'][0])
-        ordered_spans.extend(line['spans'])
+        for s in line['spans']:
+            s['line_id'] = line_id
+            ordered_spans.append(s)
     return ordered_spans
 
 print("1. Parsing questions from PDF...")
@@ -170,11 +172,13 @@ for p_idx, page in enumerate(doc):
         end_idx = q_indices[k+1][0] if k + 1 < len(q_indices) else len(spans)
         q_spans = spans[s_idx:end_idx]
         
-        q_text_parts = []
+        q_text = ""
         in_options = False
-        options = {1: [], 2: [], 3: [], 4: []}
+        opt_a, opt_b, opt_c, opt_d = "", "", "", ""
         curr_opt = None
         correct_opt = None
+        last_q_line = -1
+        last_o_line = -1
         
         for s in q_spans:
             t = s['text'].strip()
@@ -193,23 +197,35 @@ for p_idx, page in enumerate(doc):
                 if m_opt:
                     curr_opt = int(m_opt.group(1))
                     opt_content = m_opt.group(2).strip()
-                    if opt_content:
-                        options[curr_opt].append(opt_content)
+                    if curr_opt == 1: opt_a += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + opt_content if opt_a else opt_content
+                    elif curr_opt == 2: opt_b += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + opt_content if opt_b else opt_content
+                    elif curr_opt == 3: opt_c += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + opt_content if opt_c else opt_content
+                    elif curr_opt == 4: opt_d += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + opt_content if opt_d else opt_content
                     if is_green(s['color']):
                         correct_opt = curr_opt
                 else:
                     if curr_opt:
-                        options[curr_opt].append(t)
+                        if curr_opt == 1: opt_a += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + t if opt_a else t
+                        elif curr_opt == 2: opt_b += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + t if opt_b else t
+                        elif curr_opt == 3: opt_c += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + t if opt_c else t
+                        elif curr_opt == 4: opt_d += ('\n' if last_o_line != -1 and s['line_id'] != last_o_line else ' ') + t if opt_d else t
                         if is_green(s['color']):
                             correct_opt = curr_opt
+                last_o_line = s['line_id']
             else:
-                q_text_parts.append(t)
+                if q_text:
+                    if last_q_line != -1 and s['line_id'] != last_q_line:
+                        q_text += '\n'
+                    elif not q_text.endswith('\n') and not q_text.endswith(' '):
+                        q_text += ' '
+                q_text += t
+                last_q_line = s['line_id']
                 
-        q_text = ' '.join(q_text_parts).strip()
-        opt_a = ' '.join(options[1]).strip()
-        opt_b = ' '.join(options[2]).strip()
-        opt_c = ' '.join(options[3]).strip()
-        opt_d = ' '.join(options[4]).strip()
+        q_text = q_text.strip()
+        opt_a = opt_a.strip()
+        opt_b = opt_b.strip()
+        opt_c = opt_c.strip()
+        opt_d = opt_d.strip()
         
         ans_map = {1: 'A', 2: 'B', 3: 'C', 4: 'D'}
         correct_letter = ans_map.get(correct_opt, 'A')
@@ -252,23 +268,27 @@ for q in questions_data:
     if not q['correct_answer']:
         print(f"ERROR: Missing answer for Q.{q['num']}")
 
-# 2. Save to local SQLite database
-print("\n2. Saving to local database (data.db)...")
-test_id = str(uuid.uuid4())[:8]
+# 2. Update local SQLite database inplace
+print("\n2. Updating local database (data.db)...")
 conn = sqlite3.connect('data.db')
-conn.execute("INSERT INTO tests (id, name, description, duration, status) VALUES (?, ?, ?, ?, 'published')",
-             (test_id, TEST_NAME, TEST_DESCRIPTION, DURATION_MINUTES))
+conn.row_factory = sqlite3.Row
+latest_test = conn.execute("SELECT * FROM tests WHERE name='Full Length 4' ORDER BY created_at DESC LIMIT 1").fetchone()
+if not latest_test:
+    print("Test not found locally!")
+    exit(1)
+test_id = latest_test['id']
+local_questions = conn.execute("SELECT * FROM questions WHERE test_id=? ORDER BY order_num ASC", (test_id,)).fetchall()
 
 for i, q in enumerate(questions_data):
-    q_id = str(uuid.uuid4())[:8]
-    local_img = q['image'][0] if q['image'] else ''
+    q_id = local_questions[i]['id']
+    local_img = q['image'][0] if q['image'] else local_questions[i]['question_image']
     conn.execute(
-        "INSERT INTO questions (id, test_id, question_text, question_image, option_a, option_b, option_c, option_d, correct_answer, order_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (q_id, test_id, q['question_text'], local_img, q['option_a'], q['option_b'], q['option_c'], q['option_d'], q['correct_answer'], i)
+        "UPDATE questions SET question_text=?, option_a=?, option_b=?, option_c=?, option_d=?, question_image=? WHERE id=?",
+        (q['question_text'], q['option_a'], q['option_b'], q['option_c'], q['option_d'], local_img, q_id)
     )
 conn.commit()
 conn.close()
-print(f"   Saved to local data.db with ID: {test_id}")
+print(f"   Updated local data.db for ID: {test_id}")
 
 # 3. Upload to Render
 print(f"\n3. Authenticating with Render ({RENDER_URL})...")
@@ -310,22 +330,30 @@ for q_num, (fn, fp) in table_images.items():
     except Exception as e:
         print(f"   Error uploading image for Q.{q_num}: {e}")
 
-print(f"\n4. Creating Test '{TEST_NAME}' on Render...")
-create_data = json.dumps({
-    'name': TEST_NAME,
-    'description': TEST_DESCRIPTION,
-    'duration': DURATION_MINUTES
-}).encode('utf-8')
+print(f"\n4. Fetching Test '{TEST_NAME}' from Render...")
+req = urllib.request.Request(f"{RENDER_URL}/api/tests")
+with opener.open(req) as r:
+    remote_tests = json.loads(r.read().decode())
+remote_test = next((t for t in remote_tests if t['name'] == 'Full Length 4'), None)
+if not remote_test:
+    print("Remote test not found!")
+    exit(1)
+render_test_id = remote_test['id']
+print(f"   Found remote test ID: {render_test_id}")
 
-create_req = urllib.request.Request(f"{RENDER_URL}/api/tests", data=create_data, headers={'Content-Type': 'application/json'})
-with opener.open(create_req) as resp:
-    test_res = json.loads(resp.read().decode())
-    render_test_id = test_res['id']
-    print(f"   Created on Render with ID: {render_test_id}")
+req = urllib.request.Request(f"{RENDER_URL}/api/tests/{render_test_id}/questions")
+with opener.open(req) as r:
+    remote_questions = json.loads(r.read().decode())
+remote_questions.sort(key=lambda x: x.get('order_num', 0))
 
-print(f"\n5. Uploading all 100 questions to Render...")
-for q in questions_data:
-    q_img = remote_images.get(q['num'], '')
+print(f"\n5. Updating all 100 questions on Render (Inplace)...")
+for i, q in enumerate(questions_data):
+    rq_id = remote_questions[i]['id']
+    # keep existing remote image (f9410b...) unless we uploaded a new one via script
+    q_img = remote_images.get(q['num'])
+    if not q_img:
+        q_img = remote_questions[i]['question_image']
+    
     payload = {
         'question_text': q['question_text'],
         'question_image': q_img,
@@ -336,23 +364,15 @@ for q in questions_data:
         'correct_answer': q['correct_answer']
     }
     q_req = urllib.request.Request(
-        f"{RENDER_URL}/api/tests/{render_test_id}/questions",
+        f"{RENDER_URL}/api/tests/{render_test_id}/questions/{rq_id}",
         data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type': 'application/json'}
+        headers={'Content-Type': 'application/json'},
+        method='PUT'
     )
     with opener.open(q_req) as r:
         pass
 
-print("   All 100 questions uploaded!")
-
-print("\n6. Publishing test on Render...")
-pub_req = urllib.request.Request(
-    f"{RENDER_URL}/api/tests/{render_test_id}/publish",
-    data=json.dumps({'status': 'published'}).encode('utf-8'),
-    headers={'Content-Type': 'application/json'},
-    method='PUT'
-)
-with opener.open(pub_req) as r:
-    print("   Published status:", r.read().decode())
+print("   All 100 questions updated!")
+print(f"\n\nSUCCESS! Test updated inplace at: {RENDER_URL}/test/{render_test_id}")
 
 print(f"\nSUCCESS! Test live at: {RENDER_URL}/test/{render_test_id}")
