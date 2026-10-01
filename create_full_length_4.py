@@ -102,7 +102,11 @@ special_questions = {
         'text': "If the area of a trapezium is 80 cm² and the parallel sides are 13.5 and 6.5 cm, then the distance between them (in cm) is ______."
     },
     75: {
-        'text': "In a row of 38 students facing north, Sunil is 20th from the left end. If Harsh is 10th to the right of Sunil, what is Harsh's position from the right end of the row?"
+        'text': "In a row of 38 students facing north, Sunil is 20th from the left end. If Harsh is 10th to the right of Sunil, what is Harsh's position from the right end of the row?",
+        'A': "6th",
+        'B': "7th",
+        'C': "8th",
+        'D': "9th"
     },
     83: {
         'text': "Which of the following received the top honour in the Best Urban Local Body category at the 5th National Water Awards for its innovative water conservation initiatives?"
