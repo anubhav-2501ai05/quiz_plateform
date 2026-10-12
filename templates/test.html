@@ -23,7 +23,9 @@
         const testId = window.location.pathname.split('/')[2];
         let testData = null;
         let questions = [];
-        let answers = {};    // {questionId: 'A'|'B'|'C'|'D'}
+        let answers = {};           // {questionId: 'A'|'B'|'C'|'D'}
+        let markedQuestions = {};   // {questionId: true}
+        let visitedQuestions = {};  // {questionId: true}
         let currentQ = 0;
         let timerInterval = null;
         let remainingSeconds = 0;
@@ -43,6 +45,8 @@
                 const session = {
                     testId,
                     answers,
+                    markedQuestions,
+                    visitedQuestions,
                     currentQ,
                     remainingSeconds,
                     startTime,
@@ -98,7 +102,7 @@
                     showModal(
                         '⚠️',
                         'Page Refresh Blocked',
-                        'You are currently taking a test. Refreshing might disrupt your time.<br><br>All your submitted answers are safe. Click <strong>Stay on Test</strong> to continue.',
+                        'You are currently taking a test. Refreshing might disrupt your time.<br><br>All your submitted answers and marked questions are safe. Click <strong>Stay on Test</strong> to continue.',
                         `<button class="btn btn-primary" onclick="closeModal()">Stay on Test</button>
                          <button class="btn btn-secondary" onclick="closeModal(); forceReload()">Reload Anyway</button>`
                     );
@@ -132,7 +136,7 @@
         function showToast(msg, type='success') {
             const c = document.getElementById('toastContainer');
             const t = document.createElement('div'); t.className = `toast ${type}`; t.textContent = msg;
-            c.appendChild(t); setTimeout(() => t.remove(), 4000);
+            c.appendChild(t); setTimeout(() => t.remove(), 3500);
         }
         function formatTime(s) {
             const m = Math.floor(s / 60); const sec = s % 60;
@@ -201,7 +205,10 @@
                 }
                 clearSavedSession();
                 answers = {};
+                markedQuestions = {};
+                visitedQuestions = {};
                 currentQ = 0;
+                if (questions[0]) visitedQuestions[questions[0].id] = true;
                 remainingSeconds = testData.duration * 60;
                 startTime = new Date().toISOString();
                 isSubmitting = false;
@@ -228,7 +235,10 @@
                     }
                 }
                 answers = session.answers || {};
+                markedQuestions = session.markedQuestions || {};
+                visitedQuestions = session.visitedQuestions || {};
                 currentQ = (session.currentQ >= 0 && session.currentQ < questions.length) ? session.currentQ : 0;
+                if (questions[currentQ]) visitedQuestions[questions[currentQ].id] = true;
                 remainingSeconds = session.adjustedRemaining;
                 startTime = session.startTime || new Date().toISOString();
                 isSubmitting = false;
@@ -270,13 +280,15 @@
         // ── Submit ─────────────────────────────────────────────────
         function confirmSubmit() {
             const attempted = Object.keys(answers).length;
+            const marked = Object.keys(markedQuestions).length;
             const unattempted = questions.length - attempted;
             showModal('📝', 'Submit Test?',
                 `<strong>Attempted:</strong> ${attempted} / ${questions.length}<br>
+                 <strong>Marked for Review:</strong> ${marked} / ${questions.length}<br>
                  <strong>Unattempted:</strong> ${unattempted} / ${questions.length}<br>
-                 <small style="color:var(--text-muted, #999);">⚠️ Wrong answers carry −1/3 negative marking. Unattempted = 0 marks.</small>`,
-                `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                 <button class="btn btn-primary" onclick="closeModal(); submitTest(false)">Submit Test</button>`
+                 <small style="color:var(--text-muted, #999);display:block;margin-top:8px;">⚠️ Wrong answers carry −1/3 negative marking. Unattempted = 0 marks.</small>`,
+                `<button class="btn btn-secondary" onclick="closeModal()">Continue Test</button>
+                 <button class="btn btn-primary" onclick="closeModal(); submitTest(false)">Submit Test Now</button>`
             );
         }
 
@@ -303,9 +315,39 @@
             }
         }
 
-        // ── Select Answer ──────────────────────────────────────────
+        // ── Select / Deselect Answer ───────────────────────────────
         function selectAnswer(qId, answer) {
-            answers[qId] = answer;
+            if (answers[qId] === answer) {
+                // If the user clicks the already selected option, deselect it!
+                delete answers[qId];
+                showToast('Option deselected (unattempted)', 'info');
+            } else {
+                answers[qId] = answer;
+            }
+            saveSession();
+            renderQuestion();
+            renderQNav();
+        }
+
+        function clearAnswer(qId) {
+            if (answers[qId]) {
+                delete answers[qId];
+                saveSession();
+                renderQuestion();
+                renderQNav();
+                showToast('Answer response cleared', 'info');
+            }
+        }
+
+        // ── Mark Question for Review ───────────────────────────────
+        function toggleMarkQuestion(qId) {
+            if (markedQuestions[qId]) {
+                delete markedQuestions[qId];
+                showToast(`Question ${currentQ + 1} unmarked`, 'info');
+            } else {
+                markedQuestions[qId] = true;
+                showToast(`Question ${currentQ + 1} marked for review`, 'info');
+            }
             saveSession();
             renderQuestion();
             renderQNav();
@@ -315,6 +357,9 @@
         function goToQuestion(idx) {
             if (idx >= 0 && idx < questions.length) {
                 currentQ = idx;
+                if (questions[currentQ]) {
+                    visitedQuestions[questions[currentQ].id] = true;
+                }
                 saveSession();
                 renderQuestion();
                 renderQNav();
@@ -325,7 +370,10 @@
         function reattempt() {
             clearSavedSession();
             answers = {};
+            markedQuestions = {};
+            visitedQuestions = {};
             currentQ = 0;
+            if (questions[0]) visitedQuestions[questions[0].id] = true;
             remainingSeconds = testData.duration * 60;
             startTime = new Date().toISOString();
             resultData = null;
@@ -349,6 +397,7 @@
             const saved = getSavedSession();
             const hasSaved = saved && saved.adjustedRemaining > 0;
             const attemptedCount = hasSaved ? Object.keys(saved.answers || {}).length : 0;
+            const markedCount = hasSaved ? Object.keys(saved.markedQuestions || {}).length : 0;
 
             app.innerHTML = `
                 <header class="site-header">
@@ -373,26 +422,30 @@
                                     <strong style="font-size:1.05rem;">In-Progress Session Found</strong>
                                 </div>
                                 <p style="margin: 0 0 14px 0; color: var(--text, #333); font-size:0.95rem;">
-                                    You have an active session with <strong>${attemptedCount} answered questions</strong> and <strong>${formatTime(saved.adjustedRemaining)}</strong> remaining.
+                                    You have an active session with <strong>${attemptedCount} answered</strong>, <strong>${markedCount} marked</strong>, and <strong>${formatTime(saved.adjustedRemaining)}</strong> remaining.
                                 </p>
                                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                                    <button class="btn btn-primary" onclick="resumeTest()">▶️ Resume Saved Test (${attemptedCount} Saved) ❤️</button>
+                                    <button class="btn btn-primary" onclick="resumeTest()">▶️ Resume Saved Test ❤️</button>
                                     <button class="btn btn-secondary btn-sm" onclick="clearSavedSession(); render();">Discard & Start Over</button>
                                 </div>
                             </div>
                         ` : ''}
 
                         <div class="instructions">
-                            <h3>📋 Instructions</h3>
+                            <h3>📋 Instructions & Color Guide</h3>
                             <ul>
-                                <li>Each question has four options (A, B, C, D).</li>
-                                <li>Select one answer for each question.</li>
-                                <li><strong>Marking Scheme:</strong> +1 for each correct answer, <strong>−1/3 (negative marking)</strong> for each wrong answer, 0 for unattempted.</li>
-                                <li>You can move between questions using Previous/Next.</li>
-                                <li>Your score will be shown after submission.</li>
-                                <li>The timer starts when you click Start Test.</li>
+                                <li>Each question has four options (A, B, C, D). Click an option to select it.</li>
+                                <li><strong>Deselect Option:</strong> Click the selected option again OR click <strong>Clear Response</strong> to leave it unattempted.</li>
+                                <li><strong>Mark for Review:</strong> Click <strong>Mark this question</strong> to turn the circle <strong style="color:#2563eb;">Blue</strong> so you can return to it later.</li>
+                                <li><strong>Color Palette:</strong>
+                                    <span style="color:#16a34a;font-weight:600;">🟢 Green</span> = Answered, 
+                                    <span style="color:#2563eb;font-weight:600;">🔵 Blue</span> = Marked for Review, 
+                                    <span style="color:#b91c1c;font-weight:600;">🔴 Dark Red</span> = Visited Unattempted, 
+                                    <span style="color:#64748b;font-weight:600;">⚪ Grey</span> = Not Visited.
+                                </li>
+                                <li><strong>Marking Scheme:</strong> +1 for correct, <strong>−1/3 (negative marking)</strong> for incorrect, 0 for unattempted.</li>
                                 <li>The test auto-submits when time runs out.</li>
-                                <li><strong>Auto-save:</strong> Your answers are saved continuously so you will not lose them if refreshed or interrupted.</li>
+                                <li><strong>Auto-save:</strong> All answers and progress are saved in real-time.</li>
                             </ul>
                         </div>
                         ${testData.question_count > 0 
@@ -415,6 +468,7 @@
                         <span id="timerDisplay" class="timer">⏱️ ${formatTime(remainingSeconds)}</span>
                         <button class="btn btn-primary btn-sm" onclick="confirmSubmit()">Submit Test</button>
                     </div>
+                    <div class="q-legend-bar" id="qLegendBar"></div>
                     <div class="q-nav-bar" id="qNavBar"></div>
                     <div class="question-area" id="questionArea"></div>
                 </div>`;
@@ -425,13 +479,50 @@
 
         function renderQNav() {
             const nav = document.getElementById('qNavBar');
+            const legend = document.getElementById('qLegendBar');
             if (!nav) return;
+
+            let countAnswered = 0;
+            let countMarked = 0;
+            let countUnattempted = 0;
+            let countNotVisited = 0;
+
             nav.innerHTML = questions.map((q, i) => {
                 let cls = 'q-nav-btn';
-                if (i === currentQ) cls += ' current';
-                else if (answers[q.id]) cls += ' attempted';
-                return `<button class="${cls}" onclick="goToQuestion(${i})">${i + 1}</button>`;
+                const isMarked = !!markedQuestions[q.id];
+                const isAnswered = !!answers[q.id];
+                const isVisited = !!visitedQuestions[q.id] || i === currentQ;
+
+                if (i === currentQ) {
+                    cls += ' active-q';
+                }
+
+                if (isMarked) {
+                    cls += ' status-marked';
+                    if (isAnswered) cls += ' status-marked-answered';
+                    countMarked++;
+                } else if (isAnswered) {
+                    cls += ' status-answered';
+                    countAnswered++;
+                } else if (isVisited) {
+                    cls += ' status-unattempted';
+                    countUnattempted++;
+                } else {
+                    cls += ' status-not-visited';
+                    countNotVisited++;
+                }
+
+                return `<button class="${cls}" onclick="goToQuestion(${i})" title="Question ${i + 1}">${i + 1}</button>`;
             }).join('');
+
+            if (legend) {
+                legend.innerHTML = `
+                    <span class="legend-item"><span class="legend-badge answered"></span> Answered: <strong>${countAnswered}</strong></span>
+                    <span class="legend-item"><span class="legend-badge marked"></span> Marked: <strong>${countMarked}</strong></span>
+                    <span class="legend-item"><span class="legend-badge unattempted"></span> Not Answered: <strong>${countUnattempted}</strong></span>
+                    <span class="legend-item"><span class="legend-badge not-visited"></span> Not Visited: <strong>${countNotVisited}</strong></span>
+                `;
+            }
         }
 
         function renderQuestion() {
@@ -439,6 +530,7 @@
             if (!area) return;
             const q = questions[currentQ];
             const selected = answers[q.id] || '';
+            const isMarked = !!markedQuestions[q.id];
             const opts = [
                 {key: 'A', text: q.option_a},
                 {key: 'B', text: q.option_b},
@@ -463,13 +555,25 @@
                     `).join('')}
                 </div>
                 <div class="q-actions">
-                    <button class="btn btn-secondary" onclick="goToQuestion(${currentQ - 1})" ${currentQ === 0 ? 'disabled' : ''}>
-                        ← Previous
-                    </button>
-                    ${currentQ === questions.length - 1
-                        ? `<button class="btn btn-primary" onclick="confirmSubmit()">Submit Test</button>`
-                        : `<button class="btn btn-primary" onclick="goToQuestion(${currentQ + 1})">Next →</button>`
-                    }
+                    <div class="q-actions-left">
+                        <button class="btn btn-secondary" onclick="goToQuestion(${currentQ - 1})" ${currentQ === 0 ? 'disabled' : ''}>
+                            ← Previous
+                        </button>
+                        ${selected ? `
+                            <button class="btn-clear" onclick="clearAnswer('${q.id}')">
+                                ✕ Clear Response
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div class="q-actions-right">
+                        <button class="${isMarked ? 'btn-marked-active' : 'btn-mark'}" onclick="toggleMarkQuestion('${q.id}')">
+                            ${isMarked ? '★ Marked (Click to Unmark)' : '☆ Mark this question'}
+                        </button>
+                        ${currentQ === questions.length - 1
+                            ? `<button class="btn btn-primary" onclick="confirmSubmit()">Submit Test</button>`
+                            : `<button class="btn btn-primary" onclick="goToQuestion(${currentQ + 1})">Next →</button>`
+                        }
+                    </div>
                 </div>`;
         }
 

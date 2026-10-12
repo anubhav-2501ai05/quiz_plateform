@@ -222,22 +222,64 @@ textarea { resize: vertical; min-height: 80px; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 .test-topbar .q-indicator { font-size: 0.9rem; color: var(--text-muted); font-weight: 500; }
 
+/* ── Question Legend Bar ──────────────────────────────────── */
+.q-legend-bar {
+    background: #fff; border-bottom: 1px solid var(--border);
+    padding: 10px 20px; display: flex; gap: 16px; justify-content: center;
+    align-items: center; flex-wrap: wrap; font-size: 0.82rem; font-weight: 500;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dark); }
+.legend-badge { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.legend-badge.answered { background: #16a34a; border: 1.5px solid #15803d; }
+.legend-badge.marked { background: #2563eb; border: 1.5px solid #1d4ed8; }
+.legend-badge.unattempted { background: #b91c1c; border: 1.5px solid #991b1b; }
+.legend-badge.not-visited { background: #f1f5f9; border: 1.5px solid #94a3b8; }
+
 /* ── Question Navigator ───────────────────────────────────── */
 .q-nav-bar {
     background: #fff; border-bottom: 1px solid var(--border);
-    padding: 12px 20px; overflow-x: auto; white-space: nowrap;
-    display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
+    padding: 12px 20px; max-height: 180px; overflow-y: auto;
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
 }
 .q-nav-btn {
-    width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--border);
-    background: #fff; cursor: pointer; font-size: 0.8rem; font-weight: 600;
-    color: var(--text-muted); transition: var(--transition);
+    width: 36px; height: 36px; border-radius: 50%; border: 2px solid #cbd5e1;
+    background: #f8fafc; cursor: pointer; font-size: 0.8rem; font-weight: 700;
+    color: #475569; transition: all 0.2s ease;
     display: inline-flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
+    flex-shrink: 0; position: relative;
 }
-.q-nav-btn:hover { border-color: var(--primary); color: var(--primary); }
-.q-nav-btn.attempted { background: var(--bg-hover); border-color: var(--primary-light); color: var(--primary); }
-.q-nav-btn.current { background: var(--gradient); color: #fff; border-color: var(--primary); }
+.q-nav-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+
+/* Green: Answered */
+.q-nav-btn.status-answered {
+    background: #16a34a !important; border-color: #15803d !important; color: #ffffff !important;
+}
+
+/* Blue: Marked for Review */
+.q-nav-btn.status-marked {
+    background: #2563eb !important; border-color: #1d4ed8 !important; color: #ffffff !important;
+}
+.q-nav-btn.status-marked.status-marked-answered::after {
+    content: ''; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px;
+    background: #22c55e; border: 1.5px solid #fff; border-radius: 50%;
+}
+
+/* Dark Red: Unattempted (Visited without answering) */
+.q-nav-btn.status-unattempted {
+    background: #b91c1c !important; border-color: #991b1b !important; color: #ffffff !important;
+}
+
+/* Grey: Not Visited */
+.q-nav-btn.status-not-visited {
+    background: #f8fafc; border-color: #cbd5e1; color: #64748b;
+}
+
+/* Current Active Question Focus Ring */
+.q-nav-btn.active-q {
+    outline: 3px solid #f43f5e; outline-offset: 2px;
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.4);
+    transform: scale(1.08); z-index: 2;
+}
 
 /* ── Question Area ────────────────────────────────────────── */
 .question-area {
@@ -266,6 +308,7 @@ textarea { resize: vertical; min-height: 80px; }
     padding: 14px 18px; border: 2px solid var(--border);
     border-radius: var(--radius-md); cursor: pointer;
     transition: var(--transition); background: #fff;
+    user-select: none;
 }
 .option-item:hover { border-color: var(--primary-light); background: var(--bg-hover); }
 .option-item.selected { border-color: var(--primary); background: var(--bg-hover); box-shadow: 0 0 0 3px rgba(233,30,99,0.1); }
@@ -281,10 +324,38 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .option-text { font-size: 0.95rem; line-height: 1.5; flex: 1; white-space: pre-line; }
 
-/* ── Question Nav Buttons ─────────────────────────────────── */
+/* ── Question Nav Buttons & Mark Action ───────────────────── */
 .q-actions {
     display: flex; justify-content: space-between; align-items: center;
     margin-top: 32px; gap: 12px; flex-wrap: wrap;
+}
+.q-actions-left, .q-actions-right {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.btn-mark {
+    background: #eff6ff; color: #1d4ed8; border: 1.5px solid #3b82f6;
+    font-weight: 600; padding: 10px 18px; border-radius: var(--radius-sm);
+    cursor: pointer; transition: var(--transition);
+}
+.btn-mark:hover {
+    background: #dbeafe; border-color: #2563eb; color: #1e40af;
+}
+.btn-marked-active {
+    background: #2563eb; color: #ffffff; border: 1.5px solid #1d4ed8;
+    font-weight: 600; padding: 10px 18px; border-radius: var(--radius-sm);
+    cursor: pointer; transition: var(--transition);
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+.btn-marked-active:hover {
+    background: #1d4ed8; color: #ffffff;
+}
+.btn-clear {
+    background: #fff; color: #dc2626; border: 1.5px solid #f87171;
+    font-weight: 600; padding: 10px 18px; border-radius: var(--radius-sm);
+    cursor: pointer; transition: var(--transition);
+}
+.btn-clear:hover {
+    background: #fef2f2; border-color: #dc2626; color: #b91c1c;
 }
 .q-actions .btn { min-width: 120px; }
 
