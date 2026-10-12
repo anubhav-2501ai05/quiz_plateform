@@ -111,6 +111,27 @@
             } catch (err) {}
         }
 
+        // ── Active View State ─────────────────────────────────────
+        function getActiveView() {
+            if (window.location.hash === '#result') return 'result';
+            return 'info';
+        }
+
+        function setActiveView(view) {
+            try {
+                sessionStorage.setItem(`test_view_${testId}`, view);
+            } catch (e) {}
+            if (view === 'result') {
+                if (window.location.hash !== '#result') {
+                    window.location.hash = 'result';
+                }
+            } else {
+                if (window.location.hash === '#result') {
+                    history.replaceState(null, '', window.location.pathname + window.location.search);
+                }
+            }
+        }
+
         // ── Protection Against Accidental Refresh / Navigation ─────
         window.addEventListener('beforeunload', function (e) {
             if (appState === 'taking' && !isSubmitting) {
@@ -146,7 +167,6 @@
         }
 
         // Intercept browser back button
-        window.history.pushState(null, '', window.location.href);
         window.addEventListener('popstate', function () {
             if (appState === 'taking' && !isSubmitting) {
                 window.history.pushState(null, '', window.location.href);
@@ -157,6 +177,16 @@
                     `<button class="btn btn-primary" onclick="closeModal()">Continue Test</button>
                      <button class="btn btn-secondary" onclick="closeModal(); confirmSubmit()">Submit Test</button>`
                 );
+            }
+        });
+
+        window.addEventListener('hashchange', function () {
+            if (appState !== 'taking') {
+                if (window.location.hash === '#result' && getSavedResult()) {
+                    viewSavedResult();
+                } else if (!window.location.hash && appState === 'result') {
+                    viewTestInfo();
+                }
             }
         });
 
@@ -210,9 +240,10 @@
                     return;
                 }
 
-                // 2. If user already submitted the test and is viewing the report card (or refreshed while viewing)
+                // 2. If user already submitted the test and is currently viewing the report card (or refreshed while viewing)
                 const savedResult = getSavedResult();
-                if (savedResult) {
+                const activeView = getActiveView();
+                if (savedResult && activeView === 'result') {
                     resultData = savedResult;
                     appState = 'result';
                     render();
@@ -220,6 +251,8 @@
                     return;
                 }
 
+                // 3. Default to Start Test / Instructions page
+                setActiveView('info');
                 appState = 'info';
                 render();
             } catch (err) {
@@ -243,7 +276,7 @@
                     return;
                 }
                 clearSavedSession();
-                clearSavedResult();
+                // We keep savedResult in localStorage so the last attempt stays recorded until submission
                 answers = {};
                 markedQuestions = {};
                 visitedQuestions = {};
@@ -252,6 +285,7 @@
                 remainingSeconds = testData.duration * 60;
                 startTime = new Date().toISOString();
                 isSubmitting = false;
+                setActiveView('taking');
                 appState = 'taking';
                 saveSession();
                 render();
@@ -346,8 +380,9 @@
                 resultData.start_time = startTime;
                 resultData.end_time = endTime;
                 resultData.savedAt = Date.now();
-                saveResult(resultData); // Persist report card in localStorage
+                saveResult(resultData); // Persist latest report card in localStorage
                 clearSavedSession();
+                setActiveView('result');
                 appState = 'result';
                 render();
                 window.scrollTo(0, 0);
@@ -411,24 +446,23 @@
         // ── Reattempt / View Controls ──────────────────────────────
         function reattempt() {
             clearSavedSession();
-            clearSavedResult();
             answers = {};
             markedQuestions = {};
             visitedQuestions = {};
             currentQ = 0;
-            if (questions[0]) visitedQuestions[questions[0].id] = true;
-            remainingSeconds = testData.duration * 60;
-            startTime = new Date().toISOString();
-            resultData = null;
+            if (timerInterval) clearInterval(timerInterval);
             isSubmitting = false;
-            appState = 'taking';
-            saveSession();
+
+            // Smoothly navigate back to the Start Test & Instructions page
+            setActiveView('info');
+            appState = 'info';
             render();
-            startTimer();
             window.scrollTo(0, 0);
+            showToast('Ready for reattempt! Review instructions and click Start Test ❤️', 'info');
         }
 
         function viewTestInfo() {
+            setActiveView('info');
             appState = 'info';
             render();
             window.scrollTo(0, 0);
@@ -437,9 +471,12 @@
         function viewSavedResult() {
             resultData = getSavedResult();
             if (resultData) {
+                setActiveView('result');
                 appState = 'result';
                 render();
                 window.scrollTo(0, 0);
+            } else {
+                showToast('No saved report card found', 'warning');
             }
         }
 
@@ -479,15 +516,15 @@
                             <div style="background: rgba(76, 175, 80, 0.08); border: 1.5px solid var(--success, #4CAF50); border-radius: 12px; padding: 18px; margin: 20px 0; text-align: left;">
                                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
                                     <span style="font-size:1.4rem;">📊</span>
-                                    <strong style="font-size:1.05rem;color:#2e7d32;">Saved Report Card Available</strong>
+                                    <strong style="font-size:1.05rem;color:#2e7d32;">Last Attempt Report Card Stored</strong>
                                 </div>
                                 <p style="margin: 0 0 14px 0; color: var(--text-dark, #333); font-size:0.95rem;">
                                     Your Score: <strong>${savedResult.score} / ${savedResult.max_score} (${savedResult.percentage}%)</strong>
                                     • Correct: <strong>${savedResult.correct}</strong> • Wrong: <strong>${savedResult.wrong}</strong> • Unattempted: <strong>${savedResult.unattempted}</strong>
                                 </p>
-                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                                    <button class="btn btn-success" onclick="viewSavedResult()">📊 Open Report Card</button>
-                                    <button class="btn btn-secondary btn-sm" onclick="clearSavedResult(); render();">Clear Report</button>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                                    <button class="btn btn-success" onclick="viewSavedResult()">📊 View Last Report Card</button>
+                                    <button class="btn btn-ghost btn-sm" onclick="clearSavedResult(); render();" style="color:var(--text-muted, #777);font-size:0.85rem;">Clear Stored Report</button>
                                 </div>
                             </div>
                         ` : ''}
@@ -528,7 +565,7 @@
                         ${testData.question_count > 0 
                             ? (hasSavedSession 
                                 ? `<button class="btn btn-primary btn-lg" onclick="resumeTest()">RESUME TEST ❤️</button>`
-                                : `<button class="btn btn-primary btn-lg" onclick="startTest()">START TEST ❤️</button>`)
+                                : `<button class="btn btn-primary btn-lg" onclick="startTest()">${savedResult ? 'START REATTEMPT ❤️' : 'START TEST ❤️'}</button>`)
                             : `<p class="text-muted mt-2">This test has no questions yet.</p>`
                         }
                         <div class="mt-2"><a href="/" class="btn btn-ghost">← Back to All Tests</a></div>
