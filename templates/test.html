@@ -34,7 +34,7 @@
         let resultData = null;
         let isSubmitting = false;
 
-        // ── Session Storage & Auto-save ────────────────────────────
+        // ── Session Storage & Auto-save (In-Progress Test) ─────────
         function getStorageKey() {
             return `test_session_${testId}`;
         }
@@ -79,6 +79,35 @@
         function clearSavedSession() {
             try {
                 localStorage.removeItem(getStorageKey());
+            } catch (err) {}
+        }
+
+        // ── Result Storage (Submitted Report Card) ─────────────────
+        function getResultStorageKey() {
+            return `test_result_${testId}`;
+        }
+
+        function saveResult(data) {
+            try {
+                localStorage.setItem(getResultStorageKey(), JSON.stringify(data));
+            } catch (err) {
+                console.warn('Failed to save test result', err);
+            }
+        }
+
+        function getSavedResult() {
+            try {
+                const raw = localStorage.getItem(getResultStorageKey());
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch (err) {
+                return null;
+            }
+        }
+
+        function clearSavedResult() {
+            try {
+                localStorage.removeItem(getResultStorageKey());
             } catch (err) {}
         }
 
@@ -173,11 +202,21 @@
                 testData = await res.json();
                 document.title = `${testData.name} - My Test Space ❤️`;
 
-                // If user accidentally refreshed during an active test (within last 5 minutes)
-                const saved = getSavedSession();
-                if (saved && saved.adjustedRemaining > 0 && saved.elapsedSeconds < 300) {
-                    await resumeTest(saved);
+                // 1. If user accidentally refreshed during an active in-progress test (within last 5 minutes)
+                const savedSession = getSavedSession();
+                if (savedSession && savedSession.adjustedRemaining > 0 && savedSession.elapsedSeconds < 300) {
+                    await resumeTest(savedSession);
                     showToast('⚡ Test restored! All your previous answers are safe.', 'success');
+                    return;
+                }
+
+                // 2. If user already submitted the test and is viewing the report card (or refreshed while viewing)
+                const savedResult = getSavedResult();
+                if (savedResult) {
+                    resultData = savedResult;
+                    appState = 'result';
+                    render();
+                    showToast('📊 Report card restored!', 'success');
                     return;
                 }
 
@@ -204,6 +243,7 @@
                     return;
                 }
                 clearSavedSession();
+                clearSavedResult();
                 answers = {};
                 markedQuestions = {};
                 visitedQuestions = {};
@@ -305,6 +345,8 @@
                 resultData = await res.json();
                 resultData.start_time = startTime;
                 resultData.end_time = endTime;
+                resultData.savedAt = Date.now();
+                saveResult(resultData); // Persist report card in localStorage
                 clearSavedSession();
                 appState = 'result';
                 render();
@@ -366,9 +408,10 @@
             }
         }
 
-        // ── Reattempt ──────────────────────────────────────────────
+        // ── Reattempt / View Controls ──────────────────────────────
         function reattempt() {
             clearSavedSession();
+            clearSavedResult();
             answers = {};
             markedQuestions = {};
             visitedQuestions = {};
@@ -385,6 +428,21 @@
             window.scrollTo(0, 0);
         }
 
+        function viewTestInfo() {
+            appState = 'info';
+            render();
+            window.scrollTo(0, 0);
+        }
+
+        function viewSavedResult() {
+            resultData = getSavedResult();
+            if (resultData) {
+                appState = 'result';
+                render();
+                window.scrollTo(0, 0);
+            }
+        }
+
         // ── Render Functions ───────────────────────────────────────
         function render() {
             const app = document.getElementById('app');
@@ -394,10 +452,12 @@
         }
 
         function renderInfo(app) {
-            const saved = getSavedSession();
-            const hasSaved = saved && saved.adjustedRemaining > 0;
-            const attemptedCount = hasSaved ? Object.keys(saved.answers || {}).length : 0;
-            const markedCount = hasSaved ? Object.keys(saved.markedQuestions || {}).length : 0;
+            const savedSession = getSavedSession();
+            const hasSavedSession = savedSession && savedSession.adjustedRemaining > 0;
+            const sessionAnsweredCount = hasSavedSession ? Object.keys(savedSession.answers || {}).length : 0;
+            const sessionMarkedCount = hasSavedSession ? Object.keys(savedSession.markedQuestions || {}).length : 0;
+
+            const savedResult = getSavedResult();
 
             app.innerHTML = `
                 <header class="site-header">
@@ -415,14 +475,31 @@
                             <span><strong>${testData.duration}</strong> Minutes</span>
                         </div>
 
-                        ${hasSaved ? `
+                        ${savedResult ? `
+                            <div style="background: rgba(76, 175, 80, 0.08); border: 1.5px solid var(--success, #4CAF50); border-radius: 12px; padding: 18px; margin: 20px 0; text-align: left;">
+                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                                    <span style="font-size:1.4rem;">📊</span>
+                                    <strong style="font-size:1.05rem;color:#2e7d32;">Saved Report Card Available</strong>
+                                </div>
+                                <p style="margin: 0 0 14px 0; color: var(--text-dark, #333); font-size:0.95rem;">
+                                    Your Score: <strong>${savedResult.score} / ${savedResult.max_score} (${savedResult.percentage}%)</strong>
+                                    • Correct: <strong>${savedResult.correct}</strong> • Wrong: <strong>${savedResult.wrong}</strong> • Unattempted: <strong>${savedResult.unattempted}</strong>
+                                </p>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                    <button class="btn btn-success" onclick="viewSavedResult()">📊 Open Report Card</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="clearSavedResult(); render();">Clear Report</button>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        ${hasSavedSession ? `
                             <div style="background: rgba(255, 75, 110, 0.08); border: 1.5px solid var(--primary, #ff4b6e); border-radius: 12px; padding: 18px; margin: 20px 0; text-align: left;">
                                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
                                     <span style="font-size:1.4rem;">💾</span>
                                     <strong style="font-size:1.05rem;">In-Progress Session Found</strong>
                                 </div>
-                                <p style="margin: 0 0 14px 0; color: var(--text, #333); font-size:0.95rem;">
-                                    You have an active session with <strong>${attemptedCount} answered</strong>, <strong>${markedCount} marked</strong>, and <strong>${formatTime(saved.adjustedRemaining)}</strong> remaining.
+                                <p style="margin: 0 0 14px 0; color: var(--text-dark, #333); font-size:0.95rem;">
+                                    You have an active session with <strong>${sessionAnsweredCount} answered</strong>, <strong>${sessionMarkedCount} marked</strong>, and <strong>${formatTime(savedSession.adjustedRemaining)}</strong> remaining.
                                 </p>
                                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
                                     <button class="btn btn-primary" onclick="resumeTest()">▶️ Resume Saved Test ❤️</button>
@@ -445,11 +522,11 @@
                                 </li>
                                 <li><strong>Marking Scheme:</strong> +1 for correct, <strong>−1/3 (negative marking)</strong> for incorrect, 0 for unattempted.</li>
                                 <li>The test auto-submits when time runs out.</li>
-                                <li><strong>Auto-save:</strong> All answers and progress are saved in real-time.</li>
+                                <li><strong>Auto-save:</strong> Answers, marked questions, and report cards are saved in real-time.</li>
                             </ul>
                         </div>
                         ${testData.question_count > 0 
-                            ? (hasSaved 
+                            ? (hasSavedSession 
                                 ? `<button class="btn btn-primary btn-lg" onclick="resumeTest()">RESUME TEST ❤️</button>`
                                 : `<button class="btn btn-primary btn-lg" onclick="startTest()">START TEST ❤️</button>`)
                             : `<p class="text-muted mt-2">This test has no questions yet.</p>`
@@ -606,7 +683,7 @@
                         <div class="score-big">${r.score} / ${r.max_score}</div>
                         <div class="score-pct">${r.percentage}%</div>
                         <div class="score-msg">${msg}</div>
-                        <div class="marking-scheme-info" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted, #999);">
+                        <div class="marking-scheme-info" style="margin-top:12px;font-size:0.85rem;color:rgba(255,255,255,0.85);">
                             Marking: +1 correct, −⅓ wrong, 0 unattempted
                         </div>
                     </div>
@@ -662,9 +739,10 @@
                         </div>`;
                     }).join('')}
 
-                    <div class="result-actions">
+                    <div class="result-actions" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:36px;">
                         <button class="btn btn-primary btn-lg" onclick="reattempt()">Reattempt Test ❤️</button>
-                        <a href="/" class="btn btn-secondary btn-lg">Back to All Tests</a>
+                        <button class="btn btn-secondary btn-lg" onclick="viewTestInfo()">View Test Details</button>
+                        <a href="/" class="btn btn-ghost btn-lg">Back to All Tests</a>
                     </div>
                 </div>`;
         }
