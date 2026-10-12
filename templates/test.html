@@ -30,13 +30,109 @@
         let startTime = null;
         let appState = 'loading'; // loading | info | taking | result
         let resultData = null;
+        let isSubmitting = false;
+
+        // ── Session Storage & Auto-save ────────────────────────────
+        function getStorageKey() {
+            return `test_session_${testId}`;
+        }
+
+        function saveSession() {
+            if (appState !== 'taking' || isSubmitting) return;
+            try {
+                const session = {
+                    testId,
+                    answers,
+                    currentQ,
+                    remainingSeconds,
+                    startTime,
+                    savedAt: Date.now()
+                };
+                localStorage.setItem(getStorageKey(), JSON.stringify(session));
+            } catch (err) {
+                console.warn('Session save failed', err);
+            }
+        }
+
+        function getSavedSession() {
+            try {
+                const raw = localStorage.getItem(getStorageKey());
+                if (!raw) return null;
+                const s = JSON.parse(raw);
+                if (!s || typeof s.remainingSeconds !== 'number' || !s.savedAt) return null;
+                const elapsed = Math.max(0, Math.floor((Date.now() - s.savedAt) / 1000));
+                const adjustedRemaining = Math.max(0, s.remainingSeconds - elapsed);
+                return {
+                    ...s,
+                    elapsedSeconds: elapsed,
+                    adjustedRemaining
+                };
+            } catch (err) {
+                return null;
+            }
+        }
+
+        function clearSavedSession() {
+            try {
+                localStorage.removeItem(getStorageKey());
+            } catch (err) {}
+        }
+
+        // ── Protection Against Accidental Refresh / Navigation ─────
+        window.addEventListener('beforeunload', function (e) {
+            if (appState === 'taking' && !isSubmitting) {
+                saveSession();
+                e.preventDefault();
+                const msg = 'You have a test in progress! If you refresh or leave, your timer and test session will be interrupted. Are you sure you want to leave?';
+                e.returnValue = msg;
+                return msg;
+            }
+        });
+
+        window.addEventListener('keydown', function (e) {
+            if (appState === 'taking' && !isSubmitting) {
+                // Intercept F5 (116) or Ctrl+R / Cmd+R (82)
+                if (e.keyCode === 116 || ((e.ctrlKey || e.metaKey) && (e.keyCode === 82 || e.key === 'r' || e.key === 'R'))) {
+                    e.preventDefault();
+                    saveSession();
+                    showModal(
+                        '⚠️',
+                        'Page Refresh Blocked',
+                        'You are currently taking a test. Refreshing might disrupt your time.<br><br>All your submitted answers are safe. Click <strong>Stay on Test</strong> to continue.',
+                        `<button class="btn btn-primary" onclick="closeModal()">Stay on Test</button>
+                         <button class="btn btn-secondary" onclick="closeModal(); forceReload()">Reload Anyway</button>`
+                    );
+                }
+            }
+        });
+
+        function forceReload() {
+            isSubmitting = true;
+            saveSession();
+            window.location.reload();
+        }
+
+        // Intercept browser back button
+        window.history.pushState(null, '', window.location.href);
+        window.addEventListener('popstate', function () {
+            if (appState === 'taking' && !isSubmitting) {
+                window.history.pushState(null, '', window.location.href);
+                showModal(
+                    '⚠️',
+                    'Leave Test?',
+                    'Your test is currently in progress. If you wish to finish, please click <strong>Submit Test</strong> instead of leaving.',
+                    `<button class="btn btn-primary" onclick="closeModal()">Continue Test</button>
+                     <button class="btn btn-secondary" onclick="closeModal(); confirmSubmit()">Submit Test</button>`
+                );
+            }
+        });
 
         // ── Utilities ──────────────────────────────────────────────
         function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
         function showToast(msg, type='success') {
             const c = document.getElementById('toastContainer');
             const t = document.createElement('div'); t.className = `toast ${type}`; t.textContent = msg;
-            c.appendChild(t); setTimeout(() => t.remove(), 3000);
+            c.appendChild(t); setTimeout(() => t.remove(), 4000);
         }
         function formatTime(s) {
             const m = Math.floor(s / 60); const sec = s % 60;
@@ -72,6 +168,15 @@
                 if (!res.ok) throw new Error('Test not found');
                 testData = await res.json();
                 document.title = `${testData.name} - My Test Space ❤️`;
+
+                // If user accidentally refreshed during an active test (within last 5 minutes)
+                const saved = getSavedSession();
+                if (saved && saved.adjustedRemaining > 0 && saved.elapsedSeconds < 300) {
+                    await resumeTest(saved);
+                    showToast('⚡ Test restored! All your previous answers are safe.', 'success');
+                    return;
+                }
+
                 appState = 'info';
                 render();
             } catch (err) {
@@ -85,7 +190,7 @@
             }
         }
 
-        // ── Start Test ─────────────────────────────────────────────
+        // ── Start / Resume Test ────────────────────────────────────
         async function startTest() {
             try {
                 const res = await fetch(`/api/tests/${testId}/questions`);
@@ -94,15 +199,46 @@
                     showToast('This test has no questions', 'error');
                     return;
                 }
+                clearSavedSession();
                 answers = {};
                 currentQ = 0;
                 remainingSeconds = testData.duration * 60;
                 startTime = new Date().toISOString();
+                isSubmitting = false;
                 appState = 'taking';
+                saveSession();
                 render();
                 startTimer();
             } catch (err) {
                 showToast('Failed to load questions', 'error');
+            }
+        }
+
+        async function resumeTest(existingSession) {
+            const session = existingSession || getSavedSession();
+            if (!session || session.adjustedRemaining <= 0) return startTest();
+
+            try {
+                if (!questions || questions.length === 0) {
+                    const res = await fetch(`/api/tests/${testId}/questions`);
+                    questions = await res.json();
+                    if (questions.length === 0) {
+                        showToast('This test has no questions', 'error');
+                        return;
+                    }
+                }
+                answers = session.answers || {};
+                currentQ = (session.currentQ >= 0 && session.currentQ < questions.length) ? session.currentQ : 0;
+                remainingSeconds = session.adjustedRemaining;
+                startTime = session.startTime || new Date().toISOString();
+                isSubmitting = false;
+                appState = 'taking';
+                saveSession();
+                render();
+                startTimer();
+            } catch (err) {
+                showToast('Failed to resume test', 'error');
+                startTest();
             }
         }
 
@@ -112,8 +248,10 @@
             timerInterval = setInterval(() => {
                 remainingSeconds--;
                 updateTimerDisplay();
+                saveSession();
                 if (remainingSeconds <= 0) {
                     clearInterval(timerInterval);
+                    clearSavedSession();
                     showToast("⏰ Time's up! Your test has been submitted automatically.", 'error');
                     submitTest(true);
                 }
@@ -143,6 +281,7 @@
         }
 
         async function submitTest(autoSubmit) {
+            isSubmitting = true;
             if (timerInterval) clearInterval(timerInterval);
             const endTime = new Date().toISOString();
             try {
@@ -154,10 +293,12 @@
                 resultData = await res.json();
                 resultData.start_time = startTime;
                 resultData.end_time = endTime;
+                clearSavedSession();
                 appState = 'result';
                 render();
                 window.scrollTo(0, 0);
             } catch (err) {
+                isSubmitting = false;
                 showToast('Failed to submit test', 'error');
             }
         }
@@ -165,6 +306,7 @@
         // ── Select Answer ──────────────────────────────────────────
         function selectAnswer(qId, answer) {
             answers[qId] = answer;
+            saveSession();
             renderQuestion();
             renderQNav();
         }
@@ -173,6 +315,7 @@
         function goToQuestion(idx) {
             if (idx >= 0 && idx < questions.length) {
                 currentQ = idx;
+                saveSession();
                 renderQuestion();
                 renderQNav();
             }
@@ -180,12 +323,15 @@
 
         // ── Reattempt ──────────────────────────────────────────────
         function reattempt() {
+            clearSavedSession();
             answers = {};
             currentQ = 0;
             remainingSeconds = testData.duration * 60;
             startTime = new Date().toISOString();
             resultData = null;
+            isSubmitting = false;
             appState = 'taking';
+            saveSession();
             render();
             startTimer();
             window.scrollTo(0, 0);
@@ -200,6 +346,10 @@
         }
 
         function renderInfo(app) {
+            const saved = getSavedSession();
+            const hasSaved = saved && saved.adjustedRemaining > 0;
+            const attemptedCount = hasSaved ? Object.keys(saved.answers || {}).length : 0;
+
             app.innerHTML = `
                 <header class="site-header">
                     <div class="header-inner">
@@ -215,6 +365,23 @@
                             <span><strong>${testData.question_count}</strong> Questions</span>
                             <span><strong>${testData.duration}</strong> Minutes</span>
                         </div>
+
+                        ${hasSaved ? `
+                            <div style="background: rgba(255, 75, 110, 0.08); border: 1.5px solid var(--primary, #ff4b6e); border-radius: 12px; padding: 18px; margin: 20px 0; text-align: left;">
+                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                                    <span style="font-size:1.4rem;">💾</span>
+                                    <strong style="font-size:1.05rem;">In-Progress Session Found</strong>
+                                </div>
+                                <p style="margin: 0 0 14px 0; color: var(--text, #333); font-size:0.95rem;">
+                                    You have an active session with <strong>${attemptedCount} answered questions</strong> and <strong>${formatTime(saved.adjustedRemaining)}</strong> remaining.
+                                </p>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                    <button class="btn btn-primary" onclick="resumeTest()">▶️ Resume Saved Test (${attemptedCount} Saved) ❤️</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="clearSavedSession(); render();">Discard & Start Over</button>
+                                </div>
+                            </div>
+                        ` : ''}
+
                         <div class="instructions">
                             <h3>📋 Instructions</h3>
                             <ul>
@@ -225,10 +392,13 @@
                                 <li>Your score will be shown after submission.</li>
                                 <li>The timer starts when you click Start Test.</li>
                                 <li>The test auto-submits when time runs out.</li>
+                                <li><strong>Auto-save:</strong> Your answers are saved continuously so you will not lose them if refreshed or interrupted.</li>
                             </ul>
                         </div>
                         ${testData.question_count > 0 
-                            ? `<button class="btn btn-primary btn-lg" onclick="startTest()">START TEST ❤️</button>`
+                            ? (hasSaved 
+                                ? `<button class="btn btn-primary btn-lg" onclick="resumeTest()">RESUME TEST ❤️</button>`
+                                : `<button class="btn btn-primary btn-lg" onclick="startTest()">START TEST ❤️</button>`)
                             : `<p class="text-muted mt-2">This test has no questions yet.</p>`
                         }
                         <div class="mt-2"><a href="/" class="btn btn-ghost">← Back to All Tests</a></div>
